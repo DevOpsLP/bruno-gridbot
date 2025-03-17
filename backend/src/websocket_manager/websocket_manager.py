@@ -334,7 +334,7 @@ def start_binance_websocket(exchange_instance, symbol, bot_config_id, amount,
                             logger.info(f"🛑 Cancelled order {order['id']}")
                     except Exception as e:
                         logger.error(f"❌ Error cancelling orders: {e}")
-                    threading.Timer(1.0, initialize_orders, args=(
+                    threading.Timer(0.5, initialize_orders, args=(
                         exchange_instance,
                         symbol,
                         amount,
@@ -359,10 +359,10 @@ def start_binance_websocket(exchange_instance, symbol, bot_config_id, amount,
                     base_asset, _ = symbol.split('/')
                     balance = exchange_instance.fetch_balance()
                     base_balance = balance.get(base_asset, {}).get('free', 0)
-                    threading.Timer(1.0, place_limit_buys, args=(
+                    threading.Timer(0.5, place_limit_buys, args=(
                         exchange_instance, symbol, amount, [new_sl_price], step_size, min_notional)
                     ).start()
-                    threading.Timer(1.0, place_limit_sell, args=(
+                    threading.Timer(0.5, place_limit_sell, args=(
                         exchange_instance, symbol, base_balance, new_sell_price, step_size)
                     ).start()
                     sl_levels.remove(sl_price)
@@ -484,7 +484,7 @@ def start_bitmart_websocket(exchange_instance, symbol, bot_config_id, amount,
                             logger.info(f"🛑 Cancelled order {order['id']}")
                     except Exception as e:
                         logger.error(f"❌ Error cancelling orders: {e}")
-                    threading.Timer(1.0, initialize_orders, args=(
+                    threading.Timer(0.5, initialize_orders, args=(
                         exchange_instance,
                         symbol,
                         amount,
@@ -509,10 +509,10 @@ def start_bitmart_websocket(exchange_instance, symbol, bot_config_id, amount,
                     base_asset, _ = symbol.split('/')
                     balance = exchange_instance.fetch_balance()
                     base_balance = balance.get(base_asset, {}).get('free', 0)
-                    threading.Timer(1.0, place_limit_buys, args=(
+                    threading.Timer(0.5, place_limit_buys, args=(
                         exchange_instance, symbol, amount, [new_sl_price], step_size, min_notional
                     )).start()
-                    threading.Timer(1.0, place_limit_sell, args=(
+                    threading.Timer(0.5, place_limit_sell, args=(
                         exchange_instance, symbol, base_balance, new_sell_price, step_size
                     )).start()
                     sl_levels.remove(sl_price)
@@ -649,7 +649,7 @@ def start_gateio_websocket(exchange_instance, symbol, bot_config_id, amount,
                             logger.info(f"🛑 Cancelled order {order['id']}")
                     except Exception as e:
                         logger.error(f"❌ Error cancelling orders: {e}")
-                    threading.Timer(1.0, initialize_orders, args=(
+                    threading.Timer(0.5, initialize_orders, args=(
                         exchange_instance,
                         symbol,
                         amount,
@@ -674,10 +674,10 @@ def start_gateio_websocket(exchange_instance, symbol, bot_config_id, amount,
                     base_asset, _ = symbol.split('/')
                     balance = exchange_instance.fetch_balance()
                     base_balance = balance.get(base_asset, {}).get('free', 0)
-                    threading.Timer(1.0, place_limit_buys, args=(
+                    threading.Timer(0.5, place_limit_buys, args=(
                         exchange_instance, symbol, amount, [new_sl_price], step_size, min_notional
                     )).start()
-                    threading.Timer(1.0, place_limit_sell, args=(
+                    threading.Timer(0.5, place_limit_sell, args=(
                         exchange_instance, symbol, base_balance, new_sell_price, step_size
                     )).start()
                     sl_levels.remove(sl_price)
