@@ -1,0 +1,11 @@
+/node_modules
+.env
+backend/venv
+backend/src/__pycache__
+backend/src/database/__pycache__
+backend/src/grid_logic/__pycache__
+backend/src/websocket_manager/__pycache__
+frontend/package-lock.json
+frontend/.vscode
+backend/alembic
+backend/trading_bot.db

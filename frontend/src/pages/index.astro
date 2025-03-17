@@ -1,0 +1,12 @@
+---
+import DashboardControls from '../components/DashboardControls';
+import PortfolioOverview from '../components/PortfolioOverview';
+import Layout from '../layouts/Layout.astro';
+---
+
+<Layout>
+	<h1 class="text-2xl font-bold mb-4">Welcome to Grid Bot! 🚀</h1>
+	<DashboardControls client:load/>
+    <PortfolioOverview client:load />
+
+</Layout>
