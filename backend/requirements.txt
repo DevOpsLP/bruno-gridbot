@@ -4,3 +4,4 @@ SQLAlchemy
 pydantic
 python-dotenv
 ccxt
+websocket-client

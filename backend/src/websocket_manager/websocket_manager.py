@@ -218,6 +218,7 @@ def initialize_orders(exchange, symbol, amount, tp_percent, sl_percent,
 
     bot_config.tp_levels_json = json.dumps([actual_tp_price])
     bot_config.sl_levels_json = json.dumps(actual_sl_prices)
+    logger.info(f"Started Grid: TP Levels: {bot_config.tp_levels_json} / Stop Loss Levels: {bot_config.sl_levels_json} ")
     db_session.commit()
 
 
@@ -316,8 +317,8 @@ def start_binance_websocket(exchange_instance, symbol, bot_config_id, amount,
                 logger.error(f"⚠️ Bot config with ID {bot_config_id} not found.")
                 return
 
-            tp_levels = json.loads(bot_config.tp_levels_json or '[]')
-            sl_levels = json.loads(bot_config.sl_levels_json or '[]')
+            tp_levels = json.loads(bot_config.tp_levels_json)
+            sl_levels = json.loads(bot_config.sl_levels_json)
 
             if tp_levels and current_price >= tp_levels[0]:
                 triggered_tp = tp_levels.pop(0)
@@ -466,8 +467,8 @@ def start_bitmart_websocket(exchange_instance, symbol, bot_config_id, amount,
                 logger.error(f"⚠️ Bot config with ID {bot_config_id} not found.")
                 return
 
-            tp_levels = json.loads(bot_config.tp_levels_json or '[]')
-            sl_levels = json.loads(bot_config.sl_levels_json or '[]')
+            tp_levels = json.loads(bot_config.tp_levels_json)
+            sl_levels = json.loads(bot_config.sl_levels_json)
 
             if tp_levels and current_price >= tp_levels[0]:
                 triggered_tp = tp_levels.pop(0)
@@ -629,12 +630,14 @@ def start_gateio_websocket(exchange_instance, symbol, bot_config_id, amount,
                 logger.error(f"⚠️ Bot config with ID {bot_config_id} not found.")
                 return
 
-            tp_levels = json.loads(bot_config.tp_levels_json or '[]')
-            sl_levels = json.loads(bot_config.sl_levels_json or '[]')
+            tp_levels = json.loads(bot_config.tp_levels_json)
+            sl_levels = json.loads(bot_config.sl_levels_json)
 
             if tp_levels and current_price >= tp_levels[0]:
+                logger.info(f"GateIO TP Level: {tp_levels}")
                 triggered_tp = tp_levels.pop(0)
                 bot_config.tp_levels_json = json.dumps(tp_levels)
+                logger.info(f"GateIO Level dumped, current TP Levels: {bot_config.tp_levels_json}")
                 session.commit()
                 logger.info(f"🎯 Price {current_price} hit TP {triggered_tp}")
                 if not tp_levels:
