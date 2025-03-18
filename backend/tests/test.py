@@ -1,36 +1,65 @@
-# install in prompt pip install discord.py==1.7.3
-import discord
-from discord.ext import commands
+import websocket
+import json
+import time
+import hmac
+import hashlib
 
-   # Configura el bot (reemplaza 'TOKEN' con tu token de usuario)
-# TOKEN = "MTMzMTYyODIwNjg0Mjk3NDI4Mw.GzUevB.QCD2qKhjn5_3ZccME4QCPrKhCVcVk2ae0sAfxc"
-TOKEN = "MzY1NjkxMDg2NTE1MDc3MTIw.GzBzUH.Spwoouj3IRUVffcblY-h0BmIsIA90TfGGDYCrs"
-intents = discord.Intents.default()
-intents.messages = True  # Habilita la recepción de mensajes  
+API_KEY = "zjy40hlm2ZwNOJcmbraOMTSuuARFwCXMQpNQ2aQAUB0UtOrFOoFbbtHkQXRLeuf5"
+API_SECRET = "hHu7Q9EltjzD3YlNjTvSJnZ95bd1N0AycPp5t3NhnuUOgoyXtsQaOSoeNnQRqYke"
 
+def generate_signature(api_key, api_secret, timestamp):
+    payload = f"apiKey={api_key}&timestamp={timestamp}"
+    signature = hmac.new(
+        api_secret.encode(),
+        payload.encode(),
+        hashlib.sha256
+    ).hexdigest()
+    return signature
 
-client = commands.Bot(command_prefix="r", self_bot=True, intents=intents)
+def on_message(ws, message):
+    print("Received:", message)
+    try:
+        data = json.loads(message)
+        if 'ping' in data:
+            pong_response = {"pong": data["ping"]}
+            ws.send(json.dumps(pong_response))
+            print("Sent pong:", pong_response)
+    except Exception as e:
+        print("Message handling error:", e)
 
-message=""   
-    
-@client.event
-async def on_ready():
-    print('hola como va todo')   
-    
-@client.event
-async def on_message(message):
-    print(f"Contenido: {message.content}\n")      # imprime los mensajes que llegan al chat 
-    msj_leido = message.content
-    print(msj_leido)
-    
-# inicia el self_bot    
-client.run(TOKEN, bot=False)   
+def on_error(ws, error):
+    print("Error:", error)
 
+def on_close(ws, close_status_code, close_msg):
+    print(f"Closed connection ({close_status_code}): {close_msg}")
 
-  
+def on_open(ws):
+    print("Connection opened!")
+    timestamp = int(time.time() * 1000)
+    signature = generate_signature(API_KEY, API_SECRET, timestamp)
 
+    logon_msg = {
+        "id": "login_request",
+        "method": "session.logon",
+        "params": {
+            "apiKey": API_KEY,
+            "signature": signature,
+            "timestamp": timestamp
+        }
+    }
 
-       
+    ws.send(json.dumps(logon_msg))
+    print("Sent logon:", logon_msg)
 
+if __name__ == "__main__":
+    websocket.enableTrace(True)
+    ws_url = "wss://testnet.binance.vision/ws-api/v3"  # Use testnet for safety
+    ws = websocket.WebSocketApp(
+        ws_url,
+        on_open=on_open,
+        on_message=on_message,
+        on_error=on_error,
+        on_close=on_close
+    )
 
-   
+    ws.run_forever(ping_interval=20, ping_timeout=10)
