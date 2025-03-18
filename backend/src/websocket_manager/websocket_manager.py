@@ -281,21 +281,15 @@ def start_binance_websocket(exchange_instance, symbol, bot_config_id, amount,
     Starts a Binance WebSocket connection for user data stream.
     """
     
-    # 🏆 Fetch bot config
+    # 🏆 Fetch bot config (Includes relationship with ExchangeAPIKey)
     bot_config = crud.get_bot_config_by_exchange_symbol(db_session, exchange_instance.id, symbol)
 
-    if bot_config:
-        # If bot config exists, fetch API key using `exchange_id`
-        api_key_entry = db_session.query(models.ExchangeAPIKey).filter_by(exchange=bot_config.exchange_id).first()
-    else:
-        # If no bot config, fetch API key directly from ExchangeAPIKey
-        api_key_entry = crud.get_api_key_by_exchange(db_session, exchange_instance.id)
-
-    if not api_key_entry:
+    if not bot_config or not bot_config.exchange_api_key:
         logger.error(f"❌ No API key found for exchange {exchange_instance.id}. Please create an API key first.")
         return None
 
-    api_key = api_key_entry.api_key  # ✅ Correct way to extract API key
+    # ✅ Directly access `api_key` from the relationship
+    api_key = bot_config.exchange_api_key.api_key
 
     # 🔥 Get listenKey manually
     listen_key = get_listen_key(api_key)
