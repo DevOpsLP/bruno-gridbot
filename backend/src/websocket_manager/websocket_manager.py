@@ -381,7 +381,7 @@ def start_binance_websocket(exchange_instance, symbol, bot_config_id, amount,
 
                         # ✅ Add new SL at position 0 (since it's the highest SL now)
                         sl_levels.insert(0, new_sl_price)
-
+                        sl_levels.sort(reverse=True)
                         # ✅ Place new limit buy order at new SL level
                         threading.Timer(0.5, place_limit_buys, args=(
                             exchange_instance, symbol, amount, [new_sl_price], tick_size, min_notional
@@ -402,19 +402,35 @@ def start_binance_websocket(exchange_instance, symbol, bot_config_id, amount,
                     new_sl_price = round_price(last_sl * (1 - sl_buffer_percent / 100), tick_size)
                     new_sell_price = round_price(sl_price * (1 + sell_rebound_percent / 100), tick_size)
                     logger.info(f"🔁 New SL @ {new_sl_price} | New Sell @ {new_sell_price}")
+
                     base_asset, _ = symbol.split('/')
                     balance = exchange_instance.fetch_balance()
                     base_balance = balance.get(base_asset, {}).get('free', 0)
+
+                    # Place new SL buy
                     threading.Timer(0.5, place_limit_buys, args=(
-                        exchange_instance, symbol, amount, [new_sl_price], step_size, min_notional)
-                    ).start()
+                        exchange_instance, symbol, amount, [new_sl_price], step_size, min_notional
+                    )).start()
+
+                    # Place new Sell (which becomes a new TP)
                     threading.Timer(0.5, place_limit_sell, args=(
-                        exchange_instance, symbol, base_balance, new_sell_price, step_size)
-                    ).start()
+                        exchange_instance, symbol, base_balance, new_sell_price, step_size
+                    )).start()
+
+                    # Update SL array
                     sl_levels.remove(sl_price)
                     sl_levels.append(new_sl_price)
                     sl_levels.sort(reverse=True)
                     bot_config.sl_levels_json = json.dumps(sl_levels)
+
+                    # ★★★ Add your new sell price to TP array so it's tracked in on_message
+                    tp_levels = json.loads(bot_config.tp_levels_json)
+                    tp_levels.append(new_sell_price)
+                    # If your code expects TPs in descending order, do this:
+                    tp_levels.sort(reverse=True)  
+                    # If it expects ascending, remove "reverse=True".
+                    bot_config.tp_levels_json = json.dumps(tp_levels)
+
                     session.commit()
                     break
 
