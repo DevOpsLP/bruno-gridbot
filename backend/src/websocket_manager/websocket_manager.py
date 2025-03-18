@@ -213,13 +213,16 @@ def initialize_orders(exchange, symbol, amount, tp_percent, sl_percent,
         for i in range(3)
     ]
 
+    balance = exchange.fetch_balance()
+    base_balance = balance.get(base_asset, {}).get('free', order_size)  # Avoid KeyError
+
     # ✅ Use threading to place TP & SL asynchronously
     actual_tp_price_container = []
     actual_sl_prices_container = []
 
     def place_tp():
         actual_tp_price_container.append(
-            place_limit_sell(exchange, symbol, order_size, intended_tp, step_size)
+            place_limit_sell(exchange, symbol, base_balance, intended_tp, step_size)
         )
 
     def place_sls():
