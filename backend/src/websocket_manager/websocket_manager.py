@@ -310,22 +310,26 @@ def start_binance_websocket(exchange_instance, symbol, bot_config_id, amount,
 
     def on_close(ws, close_status_code, close_msg):
         logger.info(f"❌ WebSocket closed: {close_status_code}, {close_msg}")
-        if not auto_reconnect:
+
+        # ✅ Check if auto_reconnect is disabled and stop reconnection
+        if not getattr(ws, "auto_reconnect", auto_reconnect):
             logger.info("Forced closure detected; closing orders.")
             close_and_sell_all(exchange_instance, symbol)
-            return
+            return  # ✅ STOP execution, preventing reconnection
 
         logger.info("Connection lost but auto-reconnect is enabled; preserving orders.")
+
         reconnect_delay = 5  # seconds
         logger.info(f"Attempting to reconnect in {reconnect_delay} seconds...")
+
         threading.Timer(
             reconnect_delay,
             lambda: start_binance_websocket(
                 exchange_instance, symbol, bot_config_id, amount,
                 step_size, tick_size, min_notional,
                 sl_buffer_percent, sell_rebound_percent,
-                auto_reconnect=auto_reconnect,
-                db_session=db_session  # ✅ Ensure `db_session` is passed on reconnect
+                auto_reconnect=auto_reconnect,  # ✅ Ensures auto_reconnect is respected
+                db_session=db_session  
             )
         ).start()
 
@@ -388,7 +392,7 @@ def start_binance_websocket(exchange_instance, symbol, bot_config_id, amount,
                             except Exception as e:
                                 logger.error(f"❌ Error cancelling orders: {e}")
                             
-                            initialize_orders, (
+                            initialize_orders(
                                 exchange_instance,
                                 symbol,
                                 amount,
@@ -588,7 +592,7 @@ def start_bitmart_websocket(exchange_instance, symbol, bot_config_id, amount,
                             except Exception as e:
                                 logger.error(f"❌ Error cancelling orders: {e}")
                             
-                            initialize_orders, (
+                            initialize_orders(
                                 exchange_instance,
                                 symbol,
                                 amount,
@@ -801,7 +805,7 @@ def start_gateio_websocket(exchange_instance, symbol, bot_config_id, amount,
                             except Exception as e:
                                 logger.error(f"❌ Error cancelling orders: {e}")
                             
-                            initialize_orders, (
+                            initialize_orders(
                                 exchange_instance,
                                 symbol,
                                 amount,
