@@ -152,7 +152,7 @@ def run_bot_with_websocket(exchange_instance, symbol, amount, db_session, bot_in
         if exchange_id == "binance":
             ws = start_binance_websocket(
                 exchange_instance, symbol, bot_config.id, amount,
-                step_size, tick_size, min_notional, sl_percent, tp_percent
+                step_size, tick_size, min_notional, sl_percent, tp_percent, True, db_session
             )
         elif exchange_id == "bitmart":
             ws = start_bitmart_websocket(
