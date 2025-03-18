@@ -135,7 +135,7 @@ def run_bot_with_websocket(exchange_instance, symbol, amount, db_session, bot_in
                 logger.info(f"Re-placing missing TP order(s): {tp_missing}")
                 base_asset, _ = symbol.split('/')
                 balance = exchange_instance.fetch_balance()
-                base_balance = balance.get(base_asset, {}).get('free', 0)
+                base_balance = balance.get(base_asset, {}).get('free')
                 if base_balance > 0:
                     missing_tp_price = tp_missing[0]
                     new_price = place_limit_sell(exchange_instance, symbol, base_balance, missing_tp_price, step_size)
@@ -401,7 +401,7 @@ def start_binance_websocket(exchange_instance, symbol, bot_config_id, amount,
 
                     base_asset, _ = symbol.split('/')
                     balance = exchange_instance.fetch_balance()
-                    base_balance = balance.get(base_asset, {}).get('free', 0)
+                    base_balance = balance.get(base_asset, {}).get('free')
 
                     # Place new SL buy
                     threading.Timer(0.5, place_limit_buys, args=(
@@ -443,7 +443,7 @@ def start_binance_websocket(exchange_instance, symbol, bot_config_id, amount,
                 logger.info(f"🛑 Cancelled order {order['id']}")
             base_asset, quote_asset = symbol.split('/')
             balance = exchange_instance.fetch_balance()
-            base_balance = balance.get(base_asset, {}).get('free', 0)
+            base_balance = balance.get(base_asset, {}).get('free')
             if base_balance > 0:
                 sell_order = exchange_instance.create_market_sell_order(symbol, base_balance)
                 logger.info(f"💰 Sold {base_balance} {base_asset} for USDT")
@@ -606,7 +606,7 @@ def start_bitmart_websocket(exchange_instance, symbol, bot_config_id, amount,
                     logger.info(f"🔁 New SL @ {new_sl_price} | New Sell @ {new_sell_price}")
                     base_asset, _ = symbol.split('/')
                     balance = exchange_instance.fetch_balance()
-                    base_balance = balance.get(base_asset, {}).get('free', 0)
+                    base_balance = balance.get(base_asset, {}).get('free')
                     threading.Timer(0.5, place_limit_buys, args=(
                         exchange_instance, symbol, amount, [new_sl_price], step_size, min_notional
                     )).start()
@@ -617,8 +617,18 @@ def start_bitmart_websocket(exchange_instance, symbol, bot_config_id, amount,
                     sl_levels.append(new_sl_price)
                     sl_levels.sort(reverse=True)
                     bot_config.sl_levels_json = json.dumps(sl_levels)
+                    
+                    # ★★★ Add your new sell price to TP array so it's tracked in on_message
+                    tp_levels = json.loads(bot_config.tp_levels_json)
+                    tp_levels.append(new_sell_price)
+                    # If your code expects TPs in descending order, do this:
+                    tp_levels.sort(reverse=True)  
+                    # If it expects ascending, remove "reverse=True".
+                    bot_config.tp_levels_json = json.dumps(tp_levels)
+
                     session.commit()
                     break
+
 
         except Exception as e:
             logger.error(f"❌ Error processing BitMart WebSocket message: {e}")
@@ -634,7 +644,7 @@ def start_bitmart_websocket(exchange_instance, symbol, bot_config_id, amount,
                 logger.info(f"🛑 Cancelled order {order['id']}")
             base_asset, _ = symbol.split('/')
             balance = exchange_instance.fetch_balance()
-            base_balance = balance.get(base_asset, {}).get('free', 0)
+            base_balance = balance.get(base_asset, {}).get('free')
             if base_balance > 0:
                 sell_order = exchange_instance.create_market_sell_order(symbol, base_balance)
                 logger.info(f"💰 Sold {base_balance} {base_asset} for USDT")
@@ -810,7 +820,7 @@ def start_gateio_websocket(exchange_instance, symbol, bot_config_id, amount,
                     logger.info(f"🔁 New SL @ {new_sl_price} | New Sell @ {new_sell_price}")
                     base_asset, _ = symbol.split('/')
                     balance = exchange_instance.fetch_balance()
-                    base_balance = balance.get(base_asset, {}).get('free', 0)
+                    base_balance = balance.get(base_asset, {}).get('free')
                     threading.Timer(0.5, place_limit_buys, args=(
                         exchange_instance, symbol, amount, [new_sl_price], step_size, min_notional
                     )).start()
@@ -821,8 +831,18 @@ def start_gateio_websocket(exchange_instance, symbol, bot_config_id, amount,
                     sl_levels.append(new_sl_price)
                     sl_levels.sort(reverse=True)
                     bot_config.sl_levels_json = json.dumps(sl_levels)
+                    
+                    # ★★★ Add your new sell price to TP array so it's tracked in on_message
+                    tp_levels = json.loads(bot_config.tp_levels_json)
+                    tp_levels.append(new_sell_price)
+                    # If your code expects TPs in descending order, do this:
+                    tp_levels.sort(reverse=True)  
+                    # If it expects ascending, remove "reverse=True".
+                    bot_config.tp_levels_json = json.dumps(tp_levels)
+
                     session.commit()
                     break
+
 
         except Exception as e:
             logger.error(f"❌ Error processing Gate.io WebSocket message: {e}")
@@ -838,7 +858,7 @@ def start_gateio_websocket(exchange_instance, symbol, bot_config_id, amount,
                 logger.info(f"🛑 Cancelled order {order['id']}")
             base_asset, _ = symbol.split('/')
             balance = exchange_instance.fetch_balance()
-            base_balance = balance.get(base_asset, {}).get('free', 0)
+            base_balance = balance.get(base_asset, {}).get('free')
             if base_balance > 0:
                 sell_order = exchange_instance.create_market_sell_order(symbol, base_balance)
                 logger.info(f"💰 Sold {base_balance} {base_asset} for USDT")
