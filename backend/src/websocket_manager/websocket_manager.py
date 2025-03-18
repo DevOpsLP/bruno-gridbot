@@ -209,11 +209,8 @@ def initialize_orders(exchange, symbol, amount, tp_percent, sl_percent,
         for i in range(3)
     ]
     
-    balance = exchange.fetch_balance()
-    base_balance = balance.get(base_asset, {}).get('free', order_size)  # Avoid KeyError
-
     # Place TP & SL orders, then store them
-    actual_tp_price = place_limit_sell(exchange, symbol, base_balance, intended_tp, step_size)
+    actual_tp_price = place_limit_sell(exchange, symbol, order_size, intended_tp, step_size)
     actual_sl_prices = place_limit_buys(exchange, symbol, amount, intended_sls, step_size, min_notional)
 
     bot_config.tp_levels_json = json.dumps([actual_tp_price])
