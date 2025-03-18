@@ -180,6 +180,8 @@ def run_bot_with_websocket(exchange_instance, symbol, amount, db_session, bot_in
     finally:
         db_session.close()
         
+import threading
+
 def initialize_orders(exchange, symbol, amount, tp_percent, sl_percent,
                       step_size, tick_size, min_notional, db_session, bot_config):
     """
@@ -191,29 +193,50 @@ def initialize_orders(exchange, symbol, amount, tp_percent, sl_percent,
 
     if min_notional and order_size * current_price < min_notional:
         logger.error("Order size below min_notional; cannot proceed.")
-        return
+        return None, None  # ✅ Ensure function still returns values
 
     params = {}
-    if exchange.id == 'gateio' or exchange.id == 'bitmart':
+    if exchange.id in ['gateio', 'bitmart']:
         params['createMarketBuyOrderRequiresPrice'] = False
 
-    if exchange.id == 'bitmart' or exchange.id == 'gateio':
+    if exchange.id in ['gateio', 'bitmart']:
         order_size = amount
-    # --- Proceed with your market buy ---
+
+    # --- Execute market buy ---
     exchange.create_market_buy_order(symbol, order_size, params=params)
     logger.info(f"Market buy executed: {order_size} {base_asset} @ {current_price}")
 
-    # The "intended" prices
+    # --- Calculate intended TP & SL prices ---
     intended_tp = round_price(current_price * (1 + tp_percent / 100), tick_size)
     intended_sls = [
         round_price(current_price * (1 - sl_percent / 100) ** (i + 1), tick_size)
         for i in range(3)
     ]
-    
-    # Place TP & SL orders, then store them
-    actual_tp_price = place_limit_sell(exchange, symbol, order_size, intended_tp, step_size)
-    actual_sl_prices = place_limit_buys(exchange, symbol, amount, intended_sls, step_size, min_notional)
 
+    # ✅ Use threading to place TP & SL asynchronously
+    actual_tp_price_container = []
+    actual_sl_prices_container = []
+
+    def place_tp():
+        actual_tp_price_container.append(
+            place_limit_sell(exchange, symbol, order_size, intended_tp, step_size)
+        )
+
+    def place_sls():
+        actual_sl_prices_container.extend(
+            place_limit_buys(exchange, symbol, amount, intended_sls, step_size, min_notional)
+        )
+
+    threading.Timer(0.5, place_tp).start()
+    threading.Timer(0.5, place_sls).start()
+
+    # ✅ Wait for threads to execute before returning values
+    threading.Timer(1.0, lambda: None).start()  # Small delay to ensure values are stored
+
+    actual_tp_price = actual_tp_price_container[0] if actual_tp_price_container else None
+    actual_sl_prices = actual_sl_prices_container if actual_sl_prices_container else []
+
+    # ✅ Store TP & SL levels in bot config
     bot_config.tp_levels_json = json.dumps([actual_tp_price])
     bot_config.sl_levels_json = json.dumps(actual_sl_prices)
     logger.info(f"Started Grid: TP Levels: {bot_config.tp_levels_json} / Stop Loss Levels: {bot_config.sl_levels_json} ")
