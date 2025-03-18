@@ -316,19 +316,15 @@ def start_binance_websocket(exchange_instance, symbol, bot_config_id, amount,
             if not bot_config:
                 logger.error(f"⚠️ Bot config with ID {bot_config_id} not found.")
                 return
-            
-            logger.info(f"[on_message] Fetched bot_config.id={bot_config.id}, tp_levels_json={bot_config.tp_levels_json}")
+
             session.refresh(bot_config)
-            logger.info(f"[on_message] After refresh: bot_config.id={bot_config.id}, tp_levels_json={bot_config.tp_levels_json}")
-            
             tp_levels = json.loads(bot_config.tp_levels_json)
             sl_levels = json.loads(bot_config.sl_levels_json)
             
-            logger.info(f"Current Price: {current_price} | Current TPs: {tp_levels}")
+            logger.info(f"Current Price: {current_price} | Current TPs: {tp_levels} | Current Stop Loss: {sl_levels}")
             
             for i in range(len(tp_levels)):  
                 if current_price > tp_levels[i]:  
-                    logger.info(f"Binance TP Level: {tp_levels}")
                     triggered_tp = tp_levels.pop(i)  # ✅ Remove the TP hit
                     bot_config.tp_levels_json = json.dumps(tp_levels)
                     logger.info(f"Binance Level dumped, current TP Levels: {bot_config.tp_levels_json}")
@@ -396,7 +392,7 @@ def start_binance_websocket(exchange_instance, symbol, bot_config_id, amount,
                     break  # ✅ Stop after processing the first TP hit
 
             for sl_price in sl_levels:
-                if current_price < sl_price:
+                if current_price <= sl_price:
                     logger.info(f"⚠️ Price {current_price} hit SL {sl_price} -> Placing new SL & Sell orders after delay.")
                     last_sl = min(sl_levels)
                     new_sl_price = round_price(last_sl * (1 - sl_buffer_percent / 100), tick_size)
@@ -552,7 +548,7 @@ def start_bitmart_websocket(exchange_instance, symbol, bot_config_id, amount,
                             except Exception as e:
                                 logger.error(f"❌ Error cancelling orders: {e}")
                             
-                            initialize_orders(
+                            initialize_orders, (
                                 exchange_instance,
                                 symbol,
                                 amount,
@@ -602,7 +598,7 @@ def start_bitmart_websocket(exchange_instance, symbol, bot_config_id, amount,
                         break  # ✅ Stop after processing the first TP hit
 
             for sl_price in sl_levels:
-                if current_price < sl_price:
+                if current_price <= sl_price:
                     logger.info(f"⚠️ Price {current_price} hit SL {sl_price} -> Placing new SL & Sell orders after delay.")
                     last_sl = min(sl_levels)
                     new_sl_price = round_price(last_sl * (1 - sl_buffer_percent / 100), tick_size)
@@ -755,7 +751,7 @@ def start_gateio_websocket(exchange_instance, symbol, bot_config_id, amount,
                             except Exception as e:
                                 logger.error(f"❌ Error cancelling orders: {e}")
                             
-                            initialize_orders(
+                            initialize_orders, (
                                 exchange_instance,
                                 symbol,
                                 amount,
@@ -806,7 +802,7 @@ def start_gateio_websocket(exchange_instance, symbol, bot_config_id, amount,
 
 
             for sl_price in sl_levels:
-                if current_price < sl_price:
+                if current_price <= sl_price:
                     logger.info(f"⚠️ Price {current_price} hit SL {sl_price} -> Placing new SL & Sell orders after delay.")
                     last_sl = min(sl_levels)
                     new_sl_price = round_price(last_sl * (1 - sl_buffer_percent / 100), tick_size)
