@@ -286,7 +286,7 @@ def start_binance_websocket(exchange_instance, symbol, bot_config_id, amount,
 
     if bot_config:
         # If bot config exists, fetch API key using `exchange_id`
-        api_key_entry = db_session.query(models.ExchangeAPIKey).filter_by(exchange_id=bot_config.exchange_id).first()
+        api_key_entry = db_session.query(models.ExchangeAPIKey).filter_by(exchange=bot_config.exchange_id).first()
     else:
         # If no bot config, fetch API key directly from ExchangeAPIKey
         api_key_entry = crud.get_api_key_by_exchange(db_session, exchange_instance.id)
