@@ -316,7 +316,11 @@ def start_binance_websocket(exchange_instance, symbol, bot_config_id, amount,
             if not bot_config:
                 logger.error(f"⚠️ Bot config with ID {bot_config_id} not found.")
                 return
-
+            
+            logger.info(f"[on_message] Fetched bot_config.id={bot_config.id}, tp_levels_json={bot_config.tp_levels_json}")
+            session.refresh(bot_config)
+            logger.info(f"[on_message] After refresh: bot_config.id={bot_config.id}, tp_levels_json={bot_config.tp_levels_json}")
+            
             tp_levels = json.loads(bot_config.tp_levels_json)
             sl_levels = json.loads(bot_config.sl_levels_json)
             
