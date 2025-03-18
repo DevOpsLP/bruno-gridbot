@@ -280,7 +280,7 @@ def start_binance_websocket(exchange_instance, symbol, bot_config_id, amount,
     """
     Starts a Binance WebSocket connection for user data stream.
     """
-    
+
     # 🏆 Fetch bot config (Includes relationship with ExchangeAPIKey)
     bot_config = crud.get_bot_config_by_exchange_symbol(db_session, exchange_instance.id, symbol)
 
@@ -300,14 +300,12 @@ def start_binance_websocket(exchange_instance, symbol, bot_config_id, amount,
 
     def on_close(ws, close_status_code, close_msg):
         logger.info(f"❌ WebSocket closed: {close_status_code}, {close_msg}")
-        if not getattr(ws, "auto_reconnect", True):
+        if not auto_reconnect:
             logger.info("Forced closure detected; closing orders.")
             close_and_sell_all(exchange_instance, symbol)
-        else:
-            logger.info("Connection lost but auto-reconnect is enabled; preserving orders.")
-        if not getattr(ws, "auto_reconnect", True):
-            logger.info("Forced closure; not attempting to reconnect.")
             return
+
+        logger.info("Connection lost but auto-reconnect is enabled; preserving orders.")
         reconnect_delay = 5  # seconds
         logger.info(f"Attempting to reconnect in {reconnect_delay} seconds...")
         threading.Timer(
@@ -316,16 +314,15 @@ def start_binance_websocket(exchange_instance, symbol, bot_config_id, amount,
                 exchange_instance, symbol, bot_config_id, amount,
                 step_size, tick_size, min_notional,
                 sl_buffer_percent, sell_rebound_percent,
-                auto_reconnect=auto_reconnect
+                auto_reconnect=auto_reconnect,
+                db_session=db_session  # ✅ Ensure `db_session` is passed on reconnect
             )
         ).start()
 
     def on_error(ws, error):
         logger.error(f"🚨 WebSocket error: {error}")
-        # Trigger closure if auto-reconnect is enabled
-        if getattr(ws, "auto_reconnect", True):
+        if auto_reconnect:
             ws.close()
-
 
     def on_message(ws, message):
         try:
@@ -344,114 +341,113 @@ def start_binance_websocket(exchange_instance, symbol, bot_config_id, amount,
             symbol_price = float(data["L"])
             current_price = symbol_price
 
-            session = SessionLocal()
-            bot_config = session.query(models.ExchangeBotConfig)\
-                                .filter(models.ExchangeBotConfig.id == bot_config_id)\
-                                .first()
-            if not bot_config:
-                logger.error(f"⚠️ Bot config with ID {bot_config_id} not found.")
-                return
+            # ✅ Open a new session for DB queries
+            with db_session() as session:
+                bot_config = session.query(models.ExchangeBotConfig)\
+                                    .filter(models.ExchangeBotConfig.id == bot_config_id)\
+                                    .first()
+                if not bot_config:
+                    logger.error(f"⚠️ Bot config with ID {bot_config_id} not found.")
+                    return
 
-            session.refresh(bot_config)
-            tp_levels = json.loads(bot_config.tp_levels_json)
-            sl_levels = json.loads(bot_config.sl_levels_json)
-            
-            logger.info(f"Current Price: {current_price} | Current TPs: {tp_levels} | Current Stop Loss: {sl_levels}")
+                session.refresh(bot_config)
+                tp_levels = json.loads(bot_config.tp_levels_json)
+                sl_levels = json.loads(bot_config.sl_levels_json)
 
-            for i in range(len(tp_levels)):  
-                if current_price >= tp_levels[i]:  
-                    triggered_tp = tp_levels.pop(i)  # ✅ Remove the TP hit
-                    bot_config.tp_levels_json = json.dumps(tp_levels)
-                    session.commit()
-                    logger.info(f"🎯 Price {current_price} hit TP {triggered_tp}")
+                logger.info(f"Current Price: {current_price} | Current TPs: {tp_levels} | Current Stop Loss: {sl_levels}")
 
-                    if i == 0:  
-                        logger.info("All TPs filled! -> Resetting grid after delay.")
-                        try:
-                            open_orders = exchange_instance.fetch_open_orders(symbol)
-                            for order in open_orders:
-                                exchange_instance.cancel_order(order['id'], symbol)
-                        except Exception as e:
-                            logger.error(f"❌ Error cancelling orders: {e}")
-                        
-                        initialize_orders(
-                            exchange_instance,
-                            symbol,
-                            amount,
-                            bot_config.tp_percent,
-                            bot_config.sl_percent,
-                            step_size,
-                            tick_size,
-                            min_notional,
-                            session,
-                            bot_config
-                        )
-                        return  
+                for i in range(len(tp_levels)):  
+                    if current_price >= tp_levels[i]:  
+                        triggered_tp = tp_levels.pop(i)  # ✅ Remove the TP hit
+                        bot_config.tp_levels_json = json.dumps(tp_levels)
+                        session.commit()
+                        logger.info(f"🎯 Price {current_price} hit TP {triggered_tp}")
 
-                    else:  
-                        new_sl_price = round_price(triggered_tp * (1 - sl_buffer_percent / 100), tick_size)
-
-                        if sl_levels:
-                            last_sl = min(sl_levels)
+                        if i == 0:  
+                            logger.info("All TPs filled! -> Resetting grid after delay.")
                             try:
                                 open_orders = exchange_instance.fetch_open_orders(symbol)
                                 for order in open_orders:
-                                    if order['price'] == last_sl:
-                                        exchange_instance.cancel_order(order['id'], symbol)
-                                        break  
+                                    exchange_instance.cancel_order(order['id'], symbol)
                             except Exception as e:
-                                logger.error(f"❌ Error cancelling SL orders: {e}")
+                                logger.error(f"❌ Error cancelling orders: {e}")
+                            
+                            initialize_orders(
+                                exchange_instance,
+                                symbol,
+                                amount,
+                                bot_config.tp_percent,
+                                bot_config.sl_percent,
+                                step_size,
+                                tick_size,
+                                min_notional,
+                                session,
+                                bot_config
+                            )
+                            return  
 
-                            sl_levels.remove(last_sl)
+                        else:  
+                            new_sl_price = round_price(triggered_tp * (1 - sl_buffer_percent / 100), tick_size)
 
-                        sl_levels.insert(0, new_sl_price)
-                        sl_levels.sort(reverse=True)
+                            if sl_levels:
+                                last_sl = min(sl_levels)
+                                try:
+                                    open_orders = exchange_instance.fetch_open_orders(symbol)
+                                    for order in open_orders:
+                                        if order['price'] == last_sl:
+                                            exchange_instance.cancel_order(order['id'], symbol)
+                                            break  
+                                except Exception as e:
+                                    logger.error(f"❌ Error cancelling SL orders: {e}")
+
+                                sl_levels.remove(last_sl)
+
+                            sl_levels.insert(0, new_sl_price)
+                            sl_levels.sort(reverse=True)
+
+                            threading.Timer(0.5, place_limit_buys, args=(
+                                exchange_instance, symbol, amount, [new_sl_price], tick_size, min_notional
+                            )).start()
+
+                            bot_config.sl_levels_json = json.dumps(sl_levels)
+                            session.commit()
+
+                        break  
+
+                for sl_price in sl_levels:
+                    if current_price <= sl_price:
+                        last_sl = min(sl_levels)
+                        new_sl_price = round_price(last_sl * (1 - sl_buffer_percent / 100), tick_size)
+                        new_sell_price = round_price(sl_price * (1 + sell_rebound_percent / 100), tick_size)
+
+                        base_asset, _ = symbol.split('/')
+                        balance = exchange_instance.fetch_balance()
+                        base_balance = balance.get(base_asset, {}).get('free')
 
                         threading.Timer(0.5, place_limit_buys, args=(
-                            exchange_instance, symbol, amount, [new_sl_price], tick_size, min_notional
+                            exchange_instance, symbol, amount, [new_sl_price], step_size, min_notional
                         )).start()
 
+                        threading.Timer(0.5, place_limit_sell, args=(
+                            exchange_instance, symbol, base_balance, new_sell_price, step_size
+                        )).start()
+
+                        sl_levels.remove(sl_price)
+                        sl_levels.append(new_sl_price)
+                        sl_levels.sort(reverse=True)
                         bot_config.sl_levels_json = json.dumps(sl_levels)
+
+                        tp_levels = json.loads(bot_config.tp_levels_json)
+                        tp_levels.append(new_sell_price)
+                        tp_levels.sort(reverse=True)  
+                        bot_config.tp_levels_json = json.dumps(tp_levels)
+
                         session.commit()
-
-                    break  
-
-            for sl_price in sl_levels:
-                if current_price <= sl_price:
-                    last_sl = min(sl_levels)
-                    new_sl_price = round_price(last_sl * (1 - sl_buffer_percent / 100), tick_size)
-                    new_sell_price = round_price(sl_price * (1 + sell_rebound_percent / 100), tick_size)
-
-                    base_asset, _ = symbol.split('/')
-                    balance = exchange_instance.fetch_balance()
-                    base_balance = balance.get(base_asset, {}).get('free')
-
-                    threading.Timer(0.5, place_limit_buys, args=(
-                        exchange_instance, symbol, amount, [new_sl_price], step_size, min_notional
-                    )).start()
-
-                    threading.Timer(0.5, place_limit_sell, args=(
-                        exchange_instance, symbol, base_balance, new_sell_price, step_size
-                    )).start()
-
-                    sl_levels.remove(sl_price)
-                    sl_levels.append(new_sl_price)
-                    sl_levels.sort(reverse=True)
-                    bot_config.sl_levels_json = json.dumps(sl_levels)
-
-                    tp_levels = json.loads(bot_config.tp_levels_json)
-                    tp_levels.append(new_sell_price)
-                    tp_levels.sort(reverse=True)  
-                    bot_config.tp_levels_json = json.dumps(tp_levels)
-
-                    session.commit()
-                    break
+                        break
 
         except Exception as e:
             logger.error(f"❌ Error processing WebSocket message: {e}")
-        finally:
-            session.close()
-            
+
     def close_and_sell_all(exchange_instance, symbol):
         try:
             open_orders = exchange_instance.fetch_open_orders(symbol)
