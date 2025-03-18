@@ -203,9 +203,9 @@ def initialize_orders(exchange, symbol, amount, tp_percent, sl_percent,
     logger.info(f"Market buy executed: {order_size} {base_asset} @ {current_price}")
 
     # The "intended" prices
-    intended_tp = round(current_price * (1 + tp_percent / 100), 8)
+    intended_tp = round_price(current_price * (1 + tp_percent / 100), tick_size)
     intended_sls = [
-        round(current_price * (1 - sl_percent / 100) ** (i + 1), 8)
+        round_price(current_price * (1 - sl_percent / 100) ** (i + 1), tick_size)
         for i in range(3)
     ]
     
@@ -319,35 +319,75 @@ def start_binance_websocket(exchange_instance, symbol, bot_config_id, amount,
 
             tp_levels = json.loads(bot_config.tp_levels_json)
             sl_levels = json.loads(bot_config.sl_levels_json)
+            
+            for i in range(len(tp_levels)):  
+                if current_price >= tp_levels[i]:  
+                    logger.info(f"GateIO TP Level: {tp_levels}")
+                    triggered_tp = tp_levels.pop(i)  # ✅ Remove the TP hit
+                    bot_config.tp_levels_json = json.dumps(tp_levels)
+                    logger.info(f"GateIO Level dumped, current TP Levels: {bot_config.tp_levels_json}")
+                    session.commit()
+                    logger.info(f"🎯 Price {current_price} hit TP {triggered_tp}")
 
-            if tp_levels and current_price >= tp_levels[0]:
-                triggered_tp = tp_levels.pop(0)
-                bot_config.tp_levels_json = json.dumps(tp_levels)
-                session.commit()
-                logger.info(f"🎯 Price {current_price} hit TP {triggered_tp}")
-                if not tp_levels:
-                    logger.info("All TPs filled! -> Resetting grid after delay.")
-                    try:
-                        open_orders = exchange_instance.fetch_open_orders(symbol)
-                        for order in open_orders:
-                            exchange_instance.cancel_order(order['id'], symbol)
-                            logger.info(f"🛑 Cancelled order {order['id']}")
-                    except Exception as e:
-                        logger.error(f"❌ Error cancelling orders: {e}")
-                    threading.Timer(0.5, initialize_orders, args=(
-                        exchange_instance,
-                        symbol,
-                        amount,
-                        bot_config.tp_percent,
-                        bot_config.sl_percent,
-                        step_size,
-                        tick_size,
-                        min_notional,
-                        session,
-                        bot_config
-                    )).start()
-                else:
-                    logger.info(f"Still have {len(tp_levels)} TPs left. Not resetting grid yet.")
+                    # ✅ If `i == 0`, we hit the **highest** TP -> reset the grid
+                    if i == 0:  
+                        logger.info("All TPs filled! -> Resetting grid after delay.")
+                        try:
+                            open_orders = exchange_instance.fetch_open_orders(symbol)
+                            for order in open_orders:
+                                exchange_instance.cancel_order(order['id'], symbol)
+                                logger.info(f"🛑 Cancelled order {order['id']}")
+                        except Exception as e:
+                            logger.error(f"❌ Error cancelling orders: {e}")
+                        
+                        threading.Timer(0.5, initialize_orders, args=(
+                            exchange_instance,
+                            symbol,
+                            amount,
+                            bot_config.tp_percent,
+                            bot_config.sl_percent,
+                            step_size,
+                            tick_size,
+                            min_notional,
+                            session,
+                            bot_config
+                        )).start()
+                        return  # ✅ Stop further TP processing (Grid Reset)
+
+                    else:  
+                        # ✅ Place a new SL based on the TP hit
+                        new_sl_price = round_price(triggered_tp * (1 - sl_buffer_percent / 100), tick_size)
+
+                        if sl_levels:
+                            last_sl = min(sl_levels)  # Get the lowest SL
+                            try:
+                                open_orders = exchange_instance.fetch_open_orders(symbol)
+                                for order in open_orders:
+                                    if order['price'] == last_sl:
+                                        exchange_instance.cancel_order(order['id'], symbol)
+                                        logger.info(f"🛑 Cancelled lowest SL order {order['id']} at {last_sl}")
+                                        break  
+                            except Exception as e:
+                                logger.error(f"❌ Error cancelling SL orders: {e}")
+
+                            # ✅ Remove the old SL from the array
+                            sl_levels.remove(last_sl)
+
+                        # ✅ Add new SL at position 0 (since it's the highest SL now)
+                        sl_levels.insert(0, new_sl_price)
+
+                        # ✅ Place new limit buy order at new SL level
+                        threading.Timer(0.5, place_limit_buys, args=(
+                            exchange_instance, symbol, amount, [new_sl_price], tick_size, min_notional
+                        )).start()
+
+                        logger.info(f"📈 New SL placed at {new_sl_price}")
+
+                        # ✅ Update SL levels in bot config
+                        bot_config.sl_levels_json = json.dumps(sl_levels)
+                        session.commit()
+
+                    break  # ✅ Stop after processing the first TP hit
 
             for sl_price in sl_levels:
                 if current_price <= sl_price:
@@ -469,35 +509,75 @@ def start_bitmart_websocket(exchange_instance, symbol, bot_config_id, amount,
 
             tp_levels = json.loads(bot_config.tp_levels_json)
             sl_levels = json.loads(bot_config.sl_levels_json)
+            
+            for i in range(len(tp_levels)):  
+                    if current_price >= tp_levels[i]:  
+                        logger.info(f"GateIO TP Level: {tp_levels}")
+                        triggered_tp = tp_levels.pop(i)  # ✅ Remove the TP hit
+                        bot_config.tp_levels_json = json.dumps(tp_levels)
+                        logger.info(f"GateIO Level dumped, current TP Levels: {bot_config.tp_levels_json}")
+                        session.commit()
+                        logger.info(f"🎯 Price {current_price} hit TP {triggered_tp}")
 
-            if tp_levels and current_price >= tp_levels[0]:
-                triggered_tp = tp_levels.pop(0)
-                bot_config.tp_levels_json = json.dumps(tp_levels)
-                session.commit()
-                logger.info(f"🎯 Price {current_price} hit TP {triggered_tp}")
-                if not tp_levels:
-                    logger.info("All TPs filled! -> Resetting grid after delay.")
-                    try:
-                        open_orders = exchange_instance.fetch_open_orders(symbol)
-                        for order in open_orders:
-                            exchange_instance.cancel_order(order['id'], symbol)
-                            logger.info(f"🛑 Cancelled order {order['id']}")
-                    except Exception as e:
-                        logger.error(f"❌ Error cancelling orders: {e}")
-                    threading.Timer(0.5, initialize_orders, args=(
-                        exchange_instance,
-                        symbol,
-                        amount,
-                        bot_config.tp_percent,
-                        bot_config.sl_percent,
-                        step_size,
-                        tick_size,
-                        min_notional,
-                        session,
-                        bot_config
-                    )).start()
-                else:
-                    logger.info(f"Still have {len(tp_levels)} TPs left. Not resetting grid yet.")
+                        # ✅ If `i == 0`, we hit the **highest** TP -> reset the grid
+                        if i == 0:  
+                            logger.info("All TPs filled! -> Resetting grid after delay.")
+                            try:
+                                open_orders = exchange_instance.fetch_open_orders(symbol)
+                                for order in open_orders:
+                                    exchange_instance.cancel_order(order['id'], symbol)
+                                    logger.info(f"🛑 Cancelled order {order['id']}")
+                            except Exception as e:
+                                logger.error(f"❌ Error cancelling orders: {e}")
+                            
+                            threading.Timer(0.5, initialize_orders, args=(
+                                exchange_instance,
+                                symbol,
+                                amount,
+                                bot_config.tp_percent,
+                                bot_config.sl_percent,
+                                step_size,
+                                tick_size,
+                                min_notional,
+                                session,
+                                bot_config
+                            )).start()
+                            return  # ✅ Stop further TP processing (Grid Reset)
+
+                        else:  
+                            # ✅ Place a new SL based on the TP hit
+                            new_sl_price = round_price(triggered_tp * (1 - sl_buffer_percent / 100), tick_size)
+
+                            if sl_levels:
+                                last_sl = min(sl_levels)  # Get the lowest SL
+                                try:
+                                    open_orders = exchange_instance.fetch_open_orders(symbol)
+                                    for order in open_orders:
+                                        if order['price'] == last_sl:
+                                            exchange_instance.cancel_order(order['id'], symbol)
+                                            logger.info(f"🛑 Cancelled lowest SL order {order['id']} at {last_sl}")
+                                            break  
+                                except Exception as e:
+                                    logger.error(f"❌ Error cancelling SL orders: {e}")
+
+                                # ✅ Remove the old SL from the array
+                                sl_levels.remove(last_sl)
+
+                            # ✅ Add new SL at position 0 (since it's the highest SL now)
+                            sl_levels.insert(0, new_sl_price)
+
+                            # ✅ Place new limit buy order at new SL level
+                            threading.Timer(0.5, place_limit_buys, args=(
+                                exchange_instance, symbol, amount, [new_sl_price], tick_size, min_notional
+                            )).start()
+
+                            logger.info(f"📈 New SL placed at {new_sl_price}")
+
+                            # ✅ Update SL levels in bot config
+                            bot_config.sl_levels_json = json.dumps(sl_levels)
+                            session.commit()
+
+                        break  # ✅ Stop after processing the first TP hit
 
             for sl_price in sl_levels:
                 if current_price <= sl_price:
@@ -632,37 +712,76 @@ def start_gateio_websocket(exchange_instance, symbol, bot_config_id, amount,
 
             tp_levels = json.loads(bot_config.tp_levels_json)
             sl_levels = json.loads(bot_config.sl_levels_json)
+            
+            for i in range(len(tp_levels)):  
+                    if current_price >= tp_levels[i]:  
+                        logger.info(f"GateIO TP Level: {tp_levels}")
+                        triggered_tp = tp_levels.pop(i)  # ✅ Remove the TP hit
+                        bot_config.tp_levels_json = json.dumps(tp_levels)
+                        logger.info(f"GateIO Level dumped, current TP Levels: {bot_config.tp_levels_json}")
+                        session.commit()
+                        logger.info(f"🎯 Price {current_price} hit TP {triggered_tp}")
 
-            if tp_levels and current_price >= tp_levels[0]:
-                logger.info(f"GateIO TP Level: {tp_levels}")
-                triggered_tp = tp_levels.pop(0)
-                bot_config.tp_levels_json = json.dumps(tp_levels)
-                logger.info(f"GateIO Level dumped, current TP Levels: {bot_config.tp_levels_json}")
-                session.commit()
-                logger.info(f"🎯 Price {current_price} hit TP {triggered_tp}")
-                if not tp_levels:
-                    logger.info("All TPs filled! -> Resetting grid after delay.")
-                    try:
-                        open_orders = exchange_instance.fetch_open_orders(symbol)
-                        for order in open_orders:
-                            exchange_instance.cancel_order(order['id'], symbol)
-                            logger.info(f"🛑 Cancelled order {order['id']}")
-                    except Exception as e:
-                        logger.error(f"❌ Error cancelling orders: {e}")
-                    threading.Timer(0.5, initialize_orders, args=(
-                        exchange_instance,
-                        symbol,
-                        amount,
-                        bot_config.tp_percent,
-                        bot_config.sl_percent,
-                        step_size,
-                        tick_size,
-                        min_notional,
-                        session,
-                        bot_config
-                    )).start()
-                else:
-                    logger.info(f"Still have {len(tp_levels)} TPs left. Not resetting grid yet.")
+                        # ✅ If `i == 0`, we hit the **highest** TP -> reset the grid
+                        if i == 0:  
+                            logger.info("All TPs filled! -> Resetting grid after delay.")
+                            try:
+                                open_orders = exchange_instance.fetch_open_orders(symbol)
+                                for order in open_orders:
+                                    exchange_instance.cancel_order(order['id'], symbol)
+                                    logger.info(f"🛑 Cancelled order {order['id']}")
+                            except Exception as e:
+                                logger.error(f"❌ Error cancelling orders: {e}")
+                            
+                            threading.Timer(0.5, initialize_orders, args=(
+                                exchange_instance,
+                                symbol,
+                                amount,
+                                bot_config.tp_percent,
+                                bot_config.sl_percent,
+                                step_size,
+                                tick_size,
+                                min_notional,
+                                session,
+                                bot_config
+                            )).start()
+                            return  # ✅ Stop further TP processing (Grid Reset)
+
+                        else:  
+                            # ✅ Place a new SL based on the TP hit
+                            new_sl_price = round_price(triggered_tp * (1 - sl_buffer_percent / 100), tick_size)
+
+                            if sl_levels:
+                                last_sl = min(sl_levels)  # Get the lowest SL
+                                try:
+                                    open_orders = exchange_instance.fetch_open_orders(symbol)
+                                    for order in open_orders:
+                                        if order['price'] == last_sl:
+                                            exchange_instance.cancel_order(order['id'], symbol)
+                                            logger.info(f"🛑 Cancelled lowest SL order {order['id']} at {last_sl}")
+                                            break  
+                                except Exception as e:
+                                    logger.error(f"❌ Error cancelling SL orders: {e}")
+
+                                # ✅ Remove the old SL from the array
+                                sl_levels.remove(last_sl)
+
+                            # ✅ Add new SL at position 0 (since it's the highest SL now)
+                            sl_levels.insert(0, new_sl_price)
+
+                            # ✅ Place new limit buy order at new SL level
+                            threading.Timer(0.5, place_limit_buys, args=(
+                                exchange_instance, symbol, amount, [new_sl_price], tick_size, min_notional
+                            )).start()
+
+                            logger.info(f"📈 New SL placed at {new_sl_price}")
+
+                            # ✅ Update SL levels in bot config
+                            bot_config.sl_levels_json = json.dumps(sl_levels)
+                            session.commit()
+
+                        break  # ✅ Stop after processing the first TP hit
+
 
             for sl_price in sl_levels:
                 if current_price <= sl_price:
