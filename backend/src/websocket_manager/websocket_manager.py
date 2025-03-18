@@ -320,12 +320,14 @@ def start_binance_websocket(exchange_instance, symbol, bot_config_id, amount,
             tp_levels = json.loads(bot_config.tp_levels_json)
             sl_levels = json.loads(bot_config.sl_levels_json)
             
+            logger.info(f"Current Price: {current_price} | Current TPs: {tp_levels}")
+            
             for i in range(len(tp_levels)):  
                 if current_price >= tp_levels[i]:  
-                    logger.info(f"GateIO TP Level: {tp_levels}")
+                    logger.info(f"Binance TP Level: {tp_levels}")
                     triggered_tp = tp_levels.pop(i)  # ✅ Remove the TP hit
                     bot_config.tp_levels_json = json.dumps(tp_levels)
-                    logger.info(f"GateIO Level dumped, current TP Levels: {bot_config.tp_levels_json}")
+                    logger.info(f"Binance Level dumped, current TP Levels: {bot_config.tp_levels_json}")
                     session.commit()
                     logger.info(f"🎯 Price {current_price} hit TP {triggered_tp}")
 
