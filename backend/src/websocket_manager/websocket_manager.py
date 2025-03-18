@@ -324,7 +324,7 @@ def start_binance_websocket(exchange_instance, symbol, bot_config_id, amount,
             logger.info(f"Current Price: {current_price} | Current TPs: {tp_levels} | Current Stop Loss: {sl_levels}")
             
             for i in range(len(tp_levels)):  
-                if current_price > tp_levels[i]:  
+                if current_price >= tp_levels[i]:  
                     triggered_tp = tp_levels.pop(i)  # ✅ Remove the TP hit
                     bot_config.tp_levels_json = json.dumps(tp_levels)
                     logger.info(f"Binance Level dumped, current TP Levels: {bot_config.tp_levels_json}")
@@ -529,7 +529,7 @@ def start_bitmart_websocket(exchange_instance, symbol, bot_config_id, amount,
             sl_levels = json.loads(bot_config.sl_levels_json)
             
             for i in range(len(tp_levels)):  
-                    if current_price > tp_levels[i]:  
+                    if current_price >= tp_levels[i]:  
                         logger.info(f"GateIO TP Level: {tp_levels}")
                         triggered_tp = tp_levels.pop(i)  # ✅ Remove the TP hit
                         bot_config.tp_levels_json = json.dumps(tp_levels)
@@ -732,7 +732,7 @@ def start_gateio_websocket(exchange_instance, symbol, bot_config_id, amount,
             sl_levels = json.loads(bot_config.sl_levels_json)
             
             for i in range(len(tp_levels)):  
-                    if current_price > tp_levels[i]:  
+                    if current_price >= tp_levels[i]:  
                         logger.info(f"GateIO TP Level: {tp_levels}")
                         triggered_tp = tp_levels.pop(i)  # ✅ Remove the TP hit
                         bot_config.tp_levels_json = json.dumps(tp_levels)
