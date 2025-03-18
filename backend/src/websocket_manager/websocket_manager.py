@@ -227,8 +227,8 @@ def initialize_orders(exchange, symbol, amount, tp_percent, sl_percent,
             place_limit_buys(exchange, symbol, amount, intended_sls, step_size, min_notional)
         )
 
-    threading.Timer(0.5, place_tp).start()
-    threading.Timer(0.5, place_sls).start()
+    threading.Timer(1, place_sls).start()
+    threading.Timer(1, place_tp).start()
 
     # ✅ Wait for threads to execute before returning values
     threading.Timer(1.0, lambda: None).start()  # Small delay to ensure values are stored
