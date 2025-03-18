@@ -9,3 +9,4 @@ frontend/package-lock.json
 frontend/.vscode
 backend/alembic
 backend/trading_bot.db
+backend/tests/test.py

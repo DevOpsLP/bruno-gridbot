@@ -5,4 +5,3 @@ pydantic
 python-dotenv
 ccxt
 websocket-client
-cryptography
