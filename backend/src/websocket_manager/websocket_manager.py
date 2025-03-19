@@ -547,7 +547,6 @@ def start_binance_websocket(exchange_instance, symbol, bot_config_id, amount,
     logger.info(f"🚀 Started Binance WebSocket for {symbol}. Listening for price movements...")
     return ws
 
-
 def start_bitmart_websocket(exchange_instance, symbol, bot_config_id, amount,
                             step_size, tick_size, min_notional, 
                             sl_buffer_percent=2.0, sell_rebound_percent=1.5,
@@ -580,11 +579,12 @@ def start_bitmart_websocket(exchange_instance, symbol, bot_config_id, amount,
         except Exception as e:
             logger.error(f"❌ Error processing BitMart WebSocket message: {e}")
 
-    def on_close():
-        logger.info(f"❌ BitMart WebSocket closed for {symbol}")
+    def on_close(ws, close_reason):
+        """Handles WebSocket closure"""
+        logger.info(f"❌ BitMart WebSocket closed for {symbol}. Reason: {close_reason}")
 
         # ✅ Properly stop WebSocket connection
-        my_client.stop()
+        ws.stop()
 
         if not auto_reconnect:
             logger.info("Forced closure detected; closing orders.")
@@ -606,11 +606,11 @@ def start_bitmart_websocket(exchange_instance, symbol, bot_config_id, amount,
             )
         ).start()
 
-    def on_error(error):
+    def on_error(ws, error):
+        """Handles WebSocket errors"""
         logger.error(f"🚨 BitMart WebSocket error: {error}")
-        # If auto-reconnect is enabled, force closure to trigger on_close
         if auto_reconnect:
-            on_close()
+            ws.close()  # ✅ This will trigger on_close()
 
     my_client = SpotSocketClient(
         stream_url=SPOT_PRIVATE_WS_URL,
@@ -630,16 +630,6 @@ def start_bitmart_websocket(exchange_instance, symbol, bot_config_id, amount,
     my_client.subscribe(args=f"spot/user/orders:{symbol.replace(',', '_')}")
 
     return my_client
-
-import hmac
-import hashlib
-import json
-import time
-import threading
-import logging
-from websocket import WebSocketApp
-
-logger = logging.getLogger(__name__)
 
 def start_gateio_websocket(exchange_instance, symbol, bot_config_id, amount,
                            step_size, tick_size, min_notional, 
@@ -703,7 +693,6 @@ def start_gateio_websocket(exchange_instance, symbol, bot_config_id, amount,
                 if time.time() - self.last_ping_tm > 15:
                     try:
                         self.send(json.dumps({"channel": "spot.ping", "event": None}))
-                        logger.info("📡 Sent Ping")
                     except Exception as e:
                         logger.error(f"❌ Error sending ping: {e}")
                         break
@@ -945,8 +934,6 @@ def process_order_update(exchange_instance, symbol, bot_config_id, amount, step_
     finally:
         if session:
             session.close()
-
-
 
 def close_and_sell_all(exchange_instance, symbol):
     try:
