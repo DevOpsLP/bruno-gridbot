@@ -631,10 +631,23 @@ def start_bitmart_websocket(exchange_instance, symbol, bot_config_id, amount,
 
     return my_client
 
+import hmac
+import hashlib
+import json
+import time
+import threading
+import logging
+from websocket import WebSocketApp
+
+logger = logging.getLogger(__name__)
+
 def start_gateio_websocket(exchange_instance, symbol, bot_config_id, amount,
                            step_size, tick_size, min_notional, 
                            sl_buffer_percent=2.0, sell_rebound_percent=1.5,
                            auto_reconnect=True, db_session=None):
+    """
+    Starts a Gate.io WebSocket connection with authentication for trade updates.
+    """
     ws_url = "wss://api.gateio.ws/ws/v4/"
     channel_symbol = symbol.replace("/", "_")
 
@@ -656,8 +669,10 @@ def start_gateio_websocket(exchange_instance, symbol, bot_config_id, amount,
             self._api_key = api_key
             self._api_secret = api_secret
             self.auto_reconnect = auto_reconnect  # ✅ Ensure auto_reconnect is respected
+            self.last_ping_tm = time.time()  # Track last ping timestamp
 
         def get_sign(self, channel, event, timestamp):
+            """Generate HMAC signature for authentication."""
             message = f"channel={channel}&event={event}&time={timestamp}"
             h = hmac.new(self._api_secret.encode("utf8"), message.encode("utf8"), hashlib.sha512)
             return h.hexdigest()
@@ -679,12 +694,28 @@ def start_gateio_websocket(exchange_instance, symbol, bot_config_id, amount,
             self.send(json.dumps(auth_data))
             logger.info("🔐 Sent authentication request.")
 
+        def send_ping(self):
+            """
+            Sends a 'ping' every 15 seconds to keep the connection alive.
+            """
+            while True:
+                time.sleep(15)
+                if time.time() - self.last_ping_tm > 15:
+                    try:
+                        self.send(json.dumps({"channel": "spot.ping", "event": None}))
+                        logger.info("📡 Sent Ping")
+                    except Exception as e:
+                        logger.error(f"❌ Error sending ping: {e}")
+                        break
+
     def on_open(ws):
+        """Handles WebSocket connection opening."""
         logger.info("✅ Gate.io WebSocket connected.")
         ws.send_auth_request()
+        threading.Thread(target=ws.send_ping, daemon=True).start()
 
     def on_message(ws, message):
-        session = None
+        """Processes incoming WebSocket messages."""
         try:
             data = json.loads(message)
             if "result" in data and isinstance(data["result"], list) and data["result"]:
@@ -702,19 +733,33 @@ def start_gateio_websocket(exchange_instance, symbol, bot_config_id, amount,
         """Handles WebSocket closure logic."""
         logger.warning(f"❌ Gate.io WebSocket Closed: {close_status_code}, {close_msg}")
 
-        # ✅ Explicitly stop WebSocket before deciding on reconnection
-        ws.close()
+        if ws is None:
+            logger.error("⚠️ WebSocket instance is None during closure.")
+            return
 
-        if not ws.auto_reconnect:
+        try:
+            ws.close()
+        except Exception as e:
+            logger.error(f"❌ Error closing WebSocket: {e}")
+
+        # ✅ Prevent reconnection if auto_reconnect is disabled
+        if not getattr(ws, "auto_reconnect", False):
             logger.info("Forced closure detected; closing orders.")
             close_and_sell_all(exchange_instance, symbol)
-            return  # ✅ Prevent reconnection
+            return  # ✅ Stop execution
 
+        # ✅ Handle reconnection
         logger.info("Connection lost but auto-reconnect is enabled; preserving orders.")
-
         reconnect_delay = 5  # seconds
         logger.info(f"🔄 Reconnecting in {reconnect_delay} seconds...")
-        threading.Timer(reconnect_delay, connect_websocket).start()
+
+        threading.Timer(reconnect_delay, lambda: start_gateio_websocket(
+            exchange_instance, symbol, bot_config_id, amount,
+            step_size, tick_size, min_notional,
+            sl_buffer_percent, sell_rebound_percent,
+            auto_reconnect=auto_reconnect,
+            db_session=db_session
+        )).start()
 
     def on_error(ws, error):
         """Handles WebSocket errors."""
@@ -722,23 +767,23 @@ def start_gateio_websocket(exchange_instance, symbol, bot_config_id, amount,
         if auto_reconnect:
             ws.close()  # ✅ Trigger on_close()
 
-    def connect_websocket():
-        """Creates and starts the WebSocket connection."""
-        ws = GateWebSocketApp(
-            ws_url,
-            api_key,
-            api_secret,
-            on_open=on_open,
-            on_message=on_message,
-            on_close=on_close,
-            on_error=on_error,
-        )
-        ws.auto_reconnect = auto_reconnect  # ✅ Ensure WebSocket respects auto-reconnect
-        ws.run_forever()
+    # ✅ Create WebSocket instance and return it
+    ws = GateWebSocketApp(
+        ws_url,
+        api_key,
+        api_secret,
+        on_open=on_open,
+        on_message=on_message,
+        on_close=on_close,
+        on_error=on_error,
+    )
 
-    threading.Thread(target=connect_websocket, daemon=True).start()
+    ws.auto_reconnect = auto_reconnect  # ✅ Ensure WebSocket respects auto-reconnect
+    threading.Thread(target=ws.run_forever, daemon=True).start()
     logger.info(f"🚀 Started Gate.io WebSocket for {symbol}. Listening for price movements...")
-    
+
+    return ws  # ✅ Return the WebSocket instance
+
 def start_bybit_websocket(exchange_instance, symbol, bot_config_id, amount,
                           step_size, tick_size, min_notional, 
                           sl_buffer_percent=2.0, sell_rebound_percent=1.5,
