@@ -28,7 +28,7 @@ export default function ExchangesButton() {
   };
 
   return (
-    <div className="relative inline-block">
+    <div className="relative inline-block z-50">
       <button
         onClick={() => setShowList(!showList)}
         className="px-4 py-2 border rounded-xl"

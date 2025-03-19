@@ -588,8 +588,12 @@ def start_bitmart_websocket(exchange_instance, symbol, bot_config_id, amount,
                 
                 if order_state in ["filled", "partially_filled"]:
                     current_price = float(order_data.get("price", order_data.get("last_fill_price", 0)))
-                    process_order_update(exchange_instance, symbol, bot_config_id, amount, step_size, 
-                                        tick_size, min_notional, sl_buffer_percent, sell_rebound_percent, current_price)
+                    process_order_update(
+                        exchange_instance, symbol, bot_config_id, amount,
+                        step_size, tick_size, min_notional, 
+                        sl_buffer_percent, sell_rebound_percent, 
+                        current_price
+                    )
         except Exception as e:
             logger.error(f"❌ Error processing BitMart WebSocket message: {e}")
 
@@ -597,18 +601,21 @@ def start_bitmart_websocket(exchange_instance, symbol, bot_config_id, amount,
         """Handles WebSocket closure"""
         logger.info(f"❌ BitMart WebSocket closed for {symbol}. Reason: {close_reason}")
 
-        # ✅ Properly stop WebSocket connection
+        # ✅ Stop WebSocket connection unconditionally
         ws.stop()
 
+        # If auto-reconnect is OFF, forcibly close orders and stop
         if not auto_reconnect:
             logger.info("Forced closure detected; closing orders.")
             close_and_sell_all(exchange_instance, symbol)
-            return  # ✅ Prevent reconnection
+            return  # No reconnect
 
         logger.info("Connection lost but auto-reconnect is enabled; preserving orders.")
         
         reconnect_delay = 5  # seconds
         logger.info(f"Attempting to reconnect in {reconnect_delay} seconds...")
+
+        # Create an all-new SpotSocketClient instance
         threading.Timer(
             reconnect_delay,
             lambda: start_bitmart_websocket(
@@ -624,7 +631,10 @@ def start_bitmart_websocket(exchange_instance, symbol, bot_config_id, amount,
         """Handles WebSocket errors"""
         logger.error(f"🚨 BitMart WebSocket error: {error}")
         if auto_reconnect:
-            ws.close()  # ✅ This will trigger on_close()
+            # This triggers `on_close` above,
+            # which in turn calls `ws.stop()` and
+            # spawns a new connection if auto_reconnect=True
+            ws.close()
 
     my_client = SpotSocketClient(
         stream_url=SPOT_PRIVATE_WS_URL,
@@ -634,7 +644,7 @@ def start_bitmart_websocket(exchange_instance, symbol, bot_config_id, amount,
         api_key=api_key,
         api_secret_key=api_secret,
         api_memo="bua",
-        reconnection=auto_reconnect,  # ✅ Ensures reconnection setting is used
+        reconnection=auto_reconnect,  # Ensures internal "reconnection" property
     )
     
     logger.info("🔑 Logging into BitMart WebSocket...")
