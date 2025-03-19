@@ -13,6 +13,7 @@ from decimal import Decimal, ROUND_DOWN
 from bitmart.lib.cloud_consts import SPOT_PRIVATE_WS_URL
 from bitmart.websocket.spot_socket_client import SpotSocketClient
 from pybit.unified_trading import WebSocket
+from websocket import WebSocketApp
 
 logger = logging.getLogger(__name__)
 
@@ -359,11 +360,6 @@ def start_binance_websocket(exchange_instance, symbol, bot_config_id, amount,
             )
         ).start()
 
-    def on_error(ws, error):
-        logger.error(f"🚨 WebSocket error: {error}")
-        if auto_reconnect:
-            ws.close()
-
     def on_message(ws, message):
         session = None  # ✅ Ensure session is defined
         try:
@@ -505,23 +501,41 @@ def start_binance_websocket(exchange_instance, symbol, bot_config_id, amount,
             if session:
                 session.close()  # ✅ Ensure session is closed
 
-    def close_and_sell_all(exchange_instance, symbol):
-        try:
-            open_orders = exchange_instance.fetch_open_orders(symbol)
-            for order in open_orders:
-                exchange_instance.cancel_order(order['id'], symbol)
-                logger.info(f"🛑 Cancelled order {order['id']}")
-            base_asset, quote_asset = symbol.split('/')
-            balance = exchange_instance.fetch_balance()
-            base_balance = balance.get(base_asset, {}).get('free')
-            if base_balance > 0:
-                sell_order = exchange_instance.create_market_sell_order(symbol, base_balance)
-                logger.info(f"💰 Sold {base_balance} {base_asset} for USDT")
-            else:
-                logger.info(f"⚠️ No {base_asset} balance to sell.")
-        except Exception as e:
-            logger.error(f"❌ Error during close_and_sell_all: {e}")
+    def on_close(ws, close_status_code, close_msg):
+        logger.info(f"❌ Binance WebSocket closed: {close_status_code}, {close_msg}")
 
+        # ✅ Close WebSocket connection explicitly
+        ws.close()
+
+        if not getattr(ws, "auto_reconnect", True):
+            logger.info("Forced closure detected; closing orders.")
+            close_and_sell_all(exchange_instance, symbol)
+        else:
+            logger.info("Connection lost but auto-reconnect is enabled; preserving orders.")
+
+        if not getattr(ws, "auto_reconnect", True):
+            logger.info("Forced closure; not attempting to reconnect.")
+            return
+
+        reconnect_delay = 5  # seconds
+        logger.info(f"Attempting to reconnect in {reconnect_delay} seconds...")
+        
+        threading.Timer(
+            reconnect_delay,
+            lambda: start_binance_websocket(
+                exchange_instance, symbol, bot_config_id, amount,
+                step_size, tick_size, min_notional,
+                sl_buffer_percent, sell_rebound_percent,
+                auto_reconnect=auto_reconnect,
+                db_session=db_session  
+            )
+        ).start()
+
+    def on_error(ws, error):
+        logger.error(f"🚨 Binance WebSocket error: {error}")
+        # If auto-reconnect is enabled, force closure to trigger on_close
+        if getattr(ws, "auto_reconnect", True):
+            ws.close()
     ws = websocket.WebSocketApp(ws_url,
                                 on_open=on_open,
                                 on_close=on_close,
@@ -555,25 +569,58 @@ def start_bitmart_websocket(exchange_instance, symbol, bot_config_id, amount,
 
     def message_handler(message):
         try:
-            data = json.loads(message)
-            if "data" in data and isinstance(data["data"], list) and data["data"]:
-                order_data = data["data"][0]
+            if "data" in message and isinstance(message["data"], list) and message["data"]:
+                order_data = message["data"][0]
                 order_state = order_data.get("order_state")
                 
                 if order_state in ["filled", "partially_filled"]:
                     current_price = float(order_data.get("price", order_data.get("last_fill_price", 0)))
                     process_order_update(exchange_instance, symbol, bot_config_id, amount, step_size, 
-                                         tick_size, min_notional, sl_buffer_percent, sell_rebound_percent, current_price)
+                                        tick_size, min_notional, sl_buffer_percent, sell_rebound_percent, current_price)
         except Exception as e:
             logger.error(f"❌ Error processing BitMart WebSocket message: {e}")
 
+    def on_close():
+        logger.info(f"❌ BitMart WebSocket closed for {symbol}")
+
+        # ✅ Properly stop WebSocket connection
+        my_client.stop()
+
+        if not auto_reconnect:
+            logger.info("Forced closure detected; closing orders.")
+            close_and_sell_all(exchange_instance, symbol)
+            return  # ✅ Prevent reconnection
+
+        logger.info("Connection lost but auto-reconnect is enabled; preserving orders.")
+        
+        reconnect_delay = 5  # seconds
+        logger.info(f"Attempting to reconnect in {reconnect_delay} seconds...")
+        threading.Timer(
+            reconnect_delay,
+            lambda: start_bitmart_websocket(
+                exchange_instance, symbol, bot_config_id, amount,
+                step_size, tick_size, min_notional,
+                sl_buffer_percent, sell_rebound_percent,
+                auto_reconnect=auto_reconnect,
+                db_session=db_session  
+            )
+        ).start()
+
+    def on_error(error):
+        logger.error(f"🚨 BitMart WebSocket error: {error}")
+        # If auto-reconnect is enabled, force closure to trigger on_close
+        if auto_reconnect:
+            on_close()
 
     my_client = SpotSocketClient(
         stream_url=SPOT_PRIVATE_WS_URL,
         on_message=message_handler,
+        on_close=on_close,
+        on_error=on_error,
         api_key=api_key,
         api_secret_key=api_secret,
-        api_memo="bua"
+        api_memo="bua",
+        reconnection=auto_reconnect,  # ✅ Ensures reconnection setting is used
     )
     
     logger.info("🔑 Logging into BitMart WebSocket...")
@@ -581,16 +628,8 @@ def start_bitmart_websocket(exchange_instance, symbol, bot_config_id, amount,
     
     logger.info(f"📡 Subscribing to order updates for {symbol}...")
     my_client.subscribe(args=f"spot/user/orders:{symbol.replace(',', '_')}")
-    
-    return my_client
 
-import logging
-import json
-import time
-import threading
-import hashlib
-import hmac
-from websocket import WebSocketApp
+    return my_client
 
 def start_gateio_websocket(exchange_instance, symbol, bot_config_id, amount,
                            step_size, tick_size, min_notional, 
@@ -616,6 +655,7 @@ def start_gateio_websocket(exchange_instance, symbol, bot_config_id, amount,
             super(GateWebSocketApp, self).__init__(url, **kwargs)
             self._api_key = api_key
             self._api_secret = api_secret
+            self.auto_reconnect = auto_reconnect  # ✅ Ensure auto_reconnect is respected
 
         def get_sign(self, channel, event, timestamp):
             message = f"channel={channel}&event={event}&time={timestamp}"
@@ -623,6 +663,7 @@ def start_gateio_websocket(exchange_instance, symbol, bot_config_id, amount,
             return h.hexdigest()
 
         def send_auth_request(self):
+            """Sends authentication request to subscribe to trade updates."""
             timestamp = int(time.time())
             auth_data = {
                 "time": timestamp,
@@ -649,22 +690,40 @@ def start_gateio_websocket(exchange_instance, symbol, bot_config_id, amount,
             if "result" in data and isinstance(data["result"], list) and data["result"]:
                 trade = data["result"][0]
                 current_price = float(trade["price"])
-                process_order_update(exchange_instance, symbol, bot_config_id, amount, step_size, tick_size, min_notional, sl_buffer_percent, sell_rebound_percent, current_price)
+                process_order_update(
+                    exchange_instance, symbol, bot_config_id, amount, 
+                    step_size, tick_size, min_notional, 
+                    sl_buffer_percent, sell_rebound_percent, current_price
+                )
         except Exception as e:
             logger.error(f"❌ Error processing Gate.io WebSocket message: {e}")
 
     def on_close(ws, close_status_code, close_msg):
+        """Handles WebSocket closure logic."""
         logger.warning(f"❌ Gate.io WebSocket Closed: {close_status_code}, {close_msg}")
-        reconnect_delay = 5
+
+        # ✅ Explicitly stop WebSocket before deciding on reconnection
+        ws.close()
+
+        if not ws.auto_reconnect:
+            logger.info("Forced closure detected; closing orders.")
+            close_and_sell_all(exchange_instance, symbol)
+            return  # ✅ Prevent reconnection
+
+        logger.info("Connection lost but auto-reconnect is enabled; preserving orders.")
+
+        reconnect_delay = 5  # seconds
         logger.info(f"🔄 Reconnecting in {reconnect_delay} seconds...")
         threading.Timer(reconnect_delay, connect_websocket).start()
 
     def on_error(ws, error):
+        """Handles WebSocket errors."""
         logger.error(f"🚨 Gate.io WebSocket Error: {error}")
         if auto_reconnect:
-            ws.close()
+            ws.close()  # ✅ Trigger on_close()
 
     def connect_websocket():
+        """Creates and starts the WebSocket connection."""
         ws = GateWebSocketApp(
             ws_url,
             api_key,
@@ -674,20 +733,18 @@ def start_gateio_websocket(exchange_instance, symbol, bot_config_id, amount,
             on_close=on_close,
             on_error=on_error,
         )
+        ws.auto_reconnect = auto_reconnect  # ✅ Ensure WebSocket respects auto-reconnect
         ws.run_forever()
-    
+
     threading.Thread(target=connect_websocket, daemon=True).start()
     logger.info(f"🚀 Started Gate.io WebSocket for {symbol}. Listening for price movements...")
-
-
-
-
+    
 def start_bybit_websocket(exchange_instance, symbol, bot_config_id, amount,
                           step_size, tick_size, min_notional, 
                           sl_buffer_percent=2.0, sell_rebound_percent=1.5,
                           auto_reconnect=True, db_session=None):
     """
-    Starts a Bybit WebSocket connection for SPOT orders.
+    Starts a Bybit WebSocket connection for SPOT orders using the Bybit SDK.
     """
     session = db_session or SessionLocal()
     bot_config = session.query(models.ExchangeBotConfig).filter(models.ExchangeBotConfig.id == bot_config_id).first()
@@ -702,12 +759,13 @@ def start_bybit_websocket(exchange_instance, symbol, bot_config_id, amount,
     session.close()
 
     def handle_message(message):
+        """Processes incoming order messages from Bybit WebSocket."""
         try:
-            if "data" in message and isinstance(message["data"], list) and message["data"]:
+            if isinstance(message, dict) and "data" in message and isinstance(message["data"], list) and message["data"]:
                 order_data = message["data"][0]
                 order_status = order_data.get("orderStatus")
                 order_symbol = order_data.get("symbol")
-                
+
                 if order_symbol == symbol and order_status in ["Filled", "PartiallyFilledCanceled"]:
                     current_price = float(order_data.get("price", order_data.get("avgPrice", 0)))
                     process_order_update(exchange_instance, symbol, bot_config_id, amount, step_size, 
@@ -715,10 +773,43 @@ def start_bybit_websocket(exchange_instance, symbol, bot_config_id, amount,
         except Exception as e:
             logger.error(f"❌ Error processing Bybit WebSocket message: {e}")
 
+    def on_close():
+        """Handles WebSocket closure logic."""
+        logger.info(f"❌ Bybit WebSocket closed for {symbol}")
+
+        # ✅ Stop WebSocket connection properly using SDK method
+        ws.stop()
+
+        if not auto_reconnect:
+            logger.info("Forced closure detected; closing orders.")
+            close_and_sell_all(exchange_instance, symbol)
+            return  # ✅ Prevent reconnection
+
+        logger.info("Connection lost but auto-reconnect is enabled; preserving orders.")
+        
+        reconnect_delay = 5  # seconds
+        logger.info(f"Attempting to reconnect in {reconnect_delay} seconds...")
+        threading.Timer(
+            reconnect_delay,
+            lambda: start_bybit_websocket(
+                exchange_instance, symbol, bot_config_id, amount,
+                step_size, tick_size, min_notional,
+                sl_buffer_percent, sell_rebound_percent,
+                auto_reconnect=auto_reconnect,
+                db_session=db_session  
+            )
+        ).start()
+
+    def on_error(error):
+        """Handles WebSocket errors."""
+        logger.error(f"🚨 Bybit WebSocket error: {error}")
+        if auto_reconnect:
+            on_close()
+
     logger.info("🚀 Connecting to Bybit WebSocket...")
 
+    # ✅ Use the Bybit SDK WebSocket class for private order tracking
     ws = WebSocket(
-        testnet=False,  # Change to True if using Bybit Testnet
         channel_type="private",
         api_key=api_key,
         api_secret=api_secret
@@ -726,8 +817,12 @@ def start_bybit_websocket(exchange_instance, symbol, bot_config_id, amount,
 
     logger.info("✅ WebSocket Connected. Subscribing to SPOT order updates...")
 
-    # Subscribe to SPOT orders
+    # ✅ Subscribe to order updates
     ws.order_stream(callback=handle_message)
+
+    # ✅ Assign event handlers to the WebSocket
+    ws.on_close = on_close
+    ws.on_error = on_error
 
     return ws
 
@@ -805,3 +900,22 @@ def process_order_update(exchange_instance, symbol, bot_config_id, amount, step_
     finally:
         if session:
             session.close()
+
+
+
+def close_and_sell_all(exchange_instance, symbol):
+    try:
+        open_orders = exchange_instance.fetch_open_orders(symbol)
+        for order in open_orders:
+            exchange_instance.cancel_order(order['id'], symbol)
+            logger.info(f"🛑 Cancelled order {order['id']}")
+        base_asset, quote_asset = symbol.split('/')
+        balance = exchange_instance.fetch_balance()
+        base_balance = balance.get(base_asset, {}).get('free')
+        if base_balance > 0:
+            sell_order = exchange_instance.create_market_sell_order(symbol, base_balance)
+            logger.info(f"💰 Sold {base_balance} {base_asset} for USDT")
+        else:
+            logger.info(f"⚠️ No {base_asset} balance to sell.")
+    except Exception as e:
+        logger.error(f"❌ Error during close_and_sell_all: {e}")
