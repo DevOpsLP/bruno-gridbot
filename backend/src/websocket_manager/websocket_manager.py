@@ -170,6 +170,11 @@ def run_bot_with_websocket(exchange_instance, symbol, amount, db_session, bot_in
                 exchange_instance, symbol, bot_config.id, amount,
                 step_size, tick_size, min_notional, sl_percent, tp_percent
             )
+        elif exchange_id == "bybit":
+            ws = start_bybit_websocket(
+                exchange_instance, symbol, bot_config.id, amount,
+                step_size, tick_size, min_notional, sl_percent, tp_percent
+            )
         else:
             logger.warning(f"No websocket method implemented for exchange: {exchange_id}")
             return None
@@ -230,39 +235,48 @@ def initialize_orders(exchange, symbol, amount, tp_percent, sl_percent,
 
 
 def place_limit_sell(exchange, symbol, amount, price, step_size):
-    """
-    Place a single limit sell at 'price'. Return the final float price from the exchange's response.
-    """
     amount = Decimal(str(amount)).quantize(Decimal(str(step_size)), rounding=ROUND_DOWN)  # Fix precision
     price = Decimal(str(price))  # Convert price to Decimal
-
+    
+    params = {}
+    if exchange.id == "bybit":
+        params["timeInForce"] = "GTC"  # Ensure order stays active until filled
+    
     try:
-        order = exchange.create_limit_sell_order(symbol, float(amount), float(price))  # Convert back to float
-        final_price = float(order['price'])
-        logger.info(f"Limit sell placed: {amount} @ {final_price}")
-        return final_price
+        order = exchange.create_limit_sell_order(symbol, float(amount), float(price), params=params)
+        if order and isinstance(order, dict) and "price" in order:
+            final_price = float(order["price"])
+            logger.info(f"Limit sell placed: {amount} @ {final_price}")
+            return final_price
+        else:
+            logger.error(f"Limit sell order creation returned unexpected response: {order}")
+            return float(price)  # Fallback
     except Exception as e:
         logger.error(f"Limit sell error {amount} @ {price}: {repr(e)}")
         return float(price)  # Fallback
     
     
 def place_limit_buys(exchange, symbol, total_usdt, prices, step_size, min_notional):
-    """
-    Place one limit buy for each price in `prices`, each using the full `total_usdt`.
-    Returns a list of final float prices from the exchange's responses.
-    """
     final_prices = []
     for p in prices:
         p = Decimal(str(p))  # Ensure price is also a Decimal
         amount = Decimal(total_usdt) / p  # Convert total_usdt to Decimal before division
         amount = amount.quantize(Decimal(str(step_size)), rounding=ROUND_DOWN)  # Fix precision
-
+        
+        params = {}
+        if exchange.id == "bybit":
+            params["timeInForce"] = "GTC"  # Ensure order stays active until filled
+        
         if not min_notional or (amount * p) >= Decimal(str(min_notional)):  # Convert min_notional to Decimal
             try:
-                order = exchange.create_limit_buy_order(symbol, float(amount), float(p))  # Convert back to float
-                final_price = float(order['price'])
-                logger.info(f"Limit buy placed: {amount} @ {final_price}")
-                final_prices.append(final_price)
+                order = exchange.create_limit_buy_order(symbol, float(amount), float(p), params=params)
+                if order and isinstance(order, dict) and "price" in order:
+                    final_price = float(order["price"])
+                    logger.info(f"Limit buy placed: {amount} @ {final_price}")
+                    final_prices.append(final_price)
+                else:
+                    logger.error(f"Limit buy order creation returned unexpected response: {order}")
+                    final_prices.append(float(p))  # Fallback
             except Exception as e:
                 logger.error(f"Limit buy error @ {p}: {repr(e)}")
                 final_prices.append(float(p))  # Convert Decimal back to float for consistency
