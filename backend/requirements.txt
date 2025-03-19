@@ -5,3 +5,5 @@ pydantic
 python-dotenv
 ccxt
 websocket-client
+bitmart-python-sdk-api
+pybit

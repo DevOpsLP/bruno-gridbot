@@ -5,9 +5,14 @@ import json
 import math
 import time
 import requests
+import hashlib
+import hmac
 from database import crud, models, schemas
 from database.database import SessionLocal
 from decimal import Decimal, ROUND_DOWN
+from bitmart.lib.cloud_consts import SPOT_PRIVATE_WS_URL
+from bitmart.websocket.spot_socket_client import SpotSocketClient
+from pybit.unified_trading import WebSocket
 
 logger = logging.getLogger(__name__)
 
@@ -266,7 +271,7 @@ def place_limit_buys(exchange, symbol, total_usdt, prices, step_size, min_notion
 
     return final_prices
 
-def get_listen_key(api_key):
+def get_binance_listen_key(api_key):
     """Fetch listenKey from Binance User Data Stream API."""
     headers = {"X-MBX-APIKEY": api_key}
     response = requests.post(f"https://api.binance.com/api/v3/userDataStream", headers=headers)
@@ -277,6 +282,24 @@ def get_listen_key(api_key):
     else:
         raise Exception(f"Error fetching listenKey: {data}")
 
+
+# ✅ Function to Generate Signature
+def generate_signature(api_key, api_secret):
+    """
+    Generate BitMart WebSocket HMAC SHA256 Signature.
+    Memo is always set to 'bua'.
+    """
+    timestamp = str(int(time.time() * 1000))  # Convert to milliseconds
+    api_memo = "bua"
+    message = f"{timestamp}#{api_memo}#bitmart.WebSocket"
+
+    signature = hmac.new(
+        api_secret.encode('utf-8'),
+        message.encode('utf-8'),
+        hashlib.sha256
+    ).hexdigest()
+
+    return timestamp, signature
 
 def start_binance_websocket(exchange_instance, symbol, bot_config_id, amount,
                             step_size, tick_size, min_notional, 
@@ -299,7 +322,7 @@ def start_binance_websocket(exchange_instance, symbol, bot_config_id, amount,
 
     # 🔥 Get listenKey manually
     try:
-        listen_key = get_listen_key(api_key)
+        listen_key = get_binance_listen_key(api_key)
     except Exception as e:
         logger.error(f"❌ Failed to get listenKey: {e}")
         session.close()
@@ -510,421 +533,275 @@ def start_binance_websocket(exchange_instance, symbol, bot_config_id, amount,
     logger.info(f"🚀 Started Binance WebSocket for {symbol}. Listening for price movements...")
     return ws
 
+
 def start_bitmart_websocket(exchange_instance, symbol, bot_config_id, amount,
                             step_size, tick_size, min_notional, 
                             sl_buffer_percent=2.0, sell_rebound_percent=1.5,
-                            auto_reconnect=True):
-    ws_url = "wss://ws-manager-compress.bitmart.com/api?protocol=1.1"
-    channel_symbol = symbol.replace("/", "_")
+                            auto_reconnect=True, db_session=None):
+    """
+    Starts a BitMart WebSocket connection with authentication.
+    """
+    session = db_session or SessionLocal()
+    bot_config = session.query(models.ExchangeBotConfig).filter(models.ExchangeBotConfig.id == bot_config_id).first()
 
-    def on_open(ws):
-        logger.info(f"✅ BitMart WebSocket connected to {ws_url}")
-        subscription_message = json.dumps({
-            "op": "subscribe",
-            "args": [f"spot/ticker:{channel_symbol}"]
-        })
-        ws.send(subscription_message)
-        logger.info(f"Subscribed to spot/ticker channel for {channel_symbol}")
+    if not bot_config or not bot_config.exchange_api_key:
+        logger.error(f"❌ No API key found for exchange {exchange_instance.id}. Please create an API key first.")
+        session.close()
+        return None
 
-    def on_close(ws, close_status_code, close_msg):
-        logger.info(f"❌ BitMart WebSocket closed: {close_status_code}, {close_msg}")
-        if not getattr(ws, "auto_reconnect", True):
-            logger.info("Forced closure detected; closing orders.")
-            close_and_sell_all(exchange_instance, symbol)
-        else:
-            logger.info("Connection lost but auto-reconnect is enabled; preserving orders.")
-        if not getattr(ws, "auto_reconnect", True):
-            logger.info("Forced closure; not attempting to reconnect.")
-            return
-        reconnect_delay = 5  # seconds
-        logger.info(f"Attempting to reconnect in {reconnect_delay} seconds...")
-        threading.Timer(
-            reconnect_delay,
-            lambda: start_bitmart_websocket(
-                exchange_instance, symbol, bot_config_id, amount,
-                step_size, tick_size, min_notional,
-                sl_buffer_percent, sell_rebound_percent,
-                auto_reconnect=auto_reconnect
-            )
-        ).start()
+    api_key = bot_config.exchange_api_key.api_key
+    api_secret = bot_config.exchange_api_key.api_secret
+    session.close()
 
-    def on_error(ws, error):
-        logger.error(f"🚨 BitMart WebSocket error: {error}")
-        # If auto-reconnect is enabled, force closure to trigger on_close
-        if getattr(ws, "auto_reconnect", True):
-            ws.close()
-
-    def on_message(ws, message):
-        session = None
+    def message_handler(message):
         try:
             data = json.loads(message)
             if "data" in data and isinstance(data["data"], list) and data["data"]:
-                ticker = data["data"][0]
-                current_price = float(ticker.get("last_price", ticker.get("ask_px", 0)))
-            else:
-                return
-
-            session = SessionLocal()
-            bot_config = session.query(models.ExchangeBotConfig)\
-                                .filter(models.ExchangeBotConfig.id == bot_config_id)\
-                                .first()
-            if not bot_config:
-                logger.error(f"⚠️ Bot config with ID {bot_config_id} not found.")
-                return
-
-            tp_levels = json.loads(bot_config.tp_levels_json)
-            sl_levels = json.loads(bot_config.sl_levels_json)
-            
-            for i in range(len(tp_levels)):  
-                    if current_price >= tp_levels[i]:  
-                        logger.info(f"GateIO TP Level: {tp_levels}")
-                        triggered_tp = tp_levels.pop(i)  # ✅ Remove the TP hit
-                        bot_config.tp_levels_json = json.dumps(tp_levels)
-                        logger.info(f"GateIO Level dumped, current TP Levels: {bot_config.tp_levels_json}")
-                        session.commit()
-                        logger.info(f"🎯 Price {current_price} hit TP {triggered_tp}")
-
-                        # ✅ If `i == 0`, we hit the **highest** TP -> reset the grid
-                        if i == 0:  
-                            logger.info("All TPs filled! -> Resetting grid after delay.")
-                            try:
-                                open_orders = exchange_instance.fetch_open_orders(symbol)
-                                for order in open_orders:
-                                    exchange_instance.cancel_order(order['id'], symbol)
-                                    logger.info(f"🛑 Cancelled order {order['id']}")
-                            except Exception as e:
-                                logger.error(f"❌ Error cancelling orders: {e}")
-                            
-                            initialize_orders(
-                                exchange_instance,
-                                symbol,
-                                amount,
-                                bot_config.tp_percent,
-                                bot_config.sl_percent,
-                                step_size,
-                                tick_size,
-                                min_notional,
-                                session,
-                                bot_config
-                            )
-                            return  # ✅ Stop further TP processing (Grid Reset)
-
-                        else:  
-                            # ✅ Place a new SL based on the TP hit
-                            new_sl_price = round_price(triggered_tp * (1 - sl_buffer_percent / 100), tick_size)
-
-                            if sl_levels:
-                                last_sl = min(sl_levels)  # Get the lowest SL
-                                try:
-                                    open_orders = exchange_instance.fetch_open_orders(symbol)
-                                    for order in open_orders:
-                                        if order['price'] == last_sl:
-                                            exchange_instance.cancel_order(order['id'], symbol)
-                                            logger.info(f"🛑 Cancelled lowest SL order {order['id']} at {last_sl}")
-                                            break  
-                                except Exception as e:
-                                    logger.error(f"❌ Error cancelling SL orders: {e}")
-
-                                # ✅ Remove the old SL from the array
-                                sl_levels.remove(last_sl)
-
-                            # ✅ Add new SL at position 0 (since it's the highest SL now)
-                            sl_levels.insert(0, new_sl_price)
-
-                            # ✅ Place new limit buy order at new SL level
-                            threading.Timer(0.5, place_limit_buys, args=(
-                                exchange_instance, symbol, amount, [new_sl_price], tick_size, min_notional
-                            )).start()
-
-                            logger.info(f"📈 New SL placed at {new_sl_price}")
-
-                            # ✅ Update SL levels in bot config
-                            bot_config.sl_levels_json = json.dumps(sl_levels)
-                            session.commit()
-
-                        break  # ✅ Stop after processing the first TP hit
-
-            for sl_price in sl_levels:
-                if current_price <= sl_price:
-                    logger.info(f"⚠️ Price {current_price} hit SL {sl_price} -> Placing new SL & Sell orders after delay.")
-                    last_sl = min(sl_levels)
-                    new_sl_price = round_price(last_sl * (1 - sl_buffer_percent / 100), tick_size)
-                    new_sell_price = round_price(sl_price * (1 + sell_rebound_percent / 100), tick_size)
-                    logger.info(f"🔁 New SL @ {new_sl_price} | New Sell @ {new_sell_price}")
-                    base_asset, _ = symbol.split('/')
-                    balance = exchange_instance.fetch_balance()
-                    base_balance = balance.get(base_asset, {}).get('free')
-                    threading.Timer(0.5, place_limit_buys, args=(
-                        exchange_instance, symbol, amount, [new_sl_price], step_size, min_notional
-                    )).start()
-                    threading.Timer(0.5, place_limit_sell, args=(
-                        exchange_instance, symbol, base_balance, new_sell_price, step_size
-                    )).start()
-                    sl_levels.remove(sl_price)
-                    sl_levels.append(new_sl_price)
-                    sl_levels.sort(reverse=True)
-                    bot_config.sl_levels_json = json.dumps(sl_levels)
-                    
-                    # ★★★ Add your new sell price to TP array so it's tracked in on_message
-                    tp_levels = json.loads(bot_config.tp_levels_json)
-                    tp_levels.append(new_sell_price)
-                    # If your code expects TPs in descending order, do this:
-                    tp_levels.sort(reverse=True)  
-                    # If it expects ascending, remove "reverse=True".
-                    bot_config.tp_levels_json = json.dumps(tp_levels)
-
-                    session.commit()
-                    break
-
-
+                order_data = data["data"][0]
+                order_state = order_data.get("order_state")
+                
+                if order_state in ["filled", "partially_filled"]:
+                    current_price = float(order_data.get("price", order_data.get("last_fill_price", 0)))
+                    process_order_update(exchange_instance, symbol, bot_config_id, amount, step_size, 
+                                         tick_size, min_notional, sl_buffer_percent, sell_rebound_percent, current_price)
         except Exception as e:
             logger.error(f"❌ Error processing BitMart WebSocket message: {e}")
-        finally:
-            if session is not None:
-                session.close()
 
-    def close_and_sell_all(exchange_instance, symbol):
-        try:
-            open_orders = exchange_instance.fetch_open_orders(symbol)
-            for order in open_orders:
-                exchange_instance.cancel_order(order['id'], symbol)
-                logger.info(f"🛑 Cancelled order {order['id']}")
-            base_asset, _ = symbol.split('/')
-            balance = exchange_instance.fetch_balance()
-            base_balance = balance.get(base_asset, {}).get('free')
-            if base_balance > 0:
-                sell_order = exchange_instance.create_market_sell_order(symbol, base_balance)
-                logger.info(f"💰 Sold {base_balance} {base_asset} for USDT")
-            else:
-                logger.info(f"⚠️ No {base_asset} balance to sell.")
-        except Exception as e:
-            logger.error(f"❌ Error during close_and_sell_all: {e}")
 
-    ws = websocket.WebSocketApp(
-        ws_url,
-        on_open=on_open,
-        on_close=on_close,
-        on_error=on_error,
-        on_message=on_message
+    my_client = SpotSocketClient(
+        stream_url=SPOT_PRIVATE_WS_URL,
+        on_message=message_handler,
+        api_key=api_key,
+        api_secret_key=api_secret,
+        api_memo="bua"
     )
-    ws.auto_reconnect = auto_reconnect
-    wst = threading.Thread(target=ws.run_forever, daemon=True)
-    wst.start()
-    logger.info(f"🚀 Started BitMart WebSocket for {symbol}. Listening for price movements...")
-    return ws
+    
+    logger.info("🔑 Logging into BitMart WebSocket...")
+    my_client.login(timeout=5)
+    
+    logger.info(f"📡 Subscribing to order updates for {symbol}...")
+    my_client.subscribe(args=f"spot/user/orders:{symbol.replace(',', '_')}")
+    
+    return my_client
+
+import logging
+import json
+import time
+import threading
+import hashlib
+import hmac
+from websocket import WebSocketApp
 
 def start_gateio_websocket(exchange_instance, symbol, bot_config_id, amount,
                            step_size, tick_size, min_notional, 
                            sl_buffer_percent=2.0, sell_rebound_percent=1.5,
-                           auto_reconnect=True):
+                           auto_reconnect=True, db_session=None):
     ws_url = "wss://api.gateio.ws/ws/v4/"
     channel_symbol = symbol.replace("/", "_")
 
+    session = db_session or SessionLocal()
+    bot_config = session.query(models.ExchangeBotConfig).filter(models.ExchangeBotConfig.id == bot_config_id).first()
+
+    if not bot_config or not bot_config.exchange_api_key:
+        logger.error(f"❌ No API key found for exchange {exchange_instance.id}. Please create an API key first.")
+        session.close()
+        return None
+
+    api_key = bot_config.exchange_api_key.api_key
+    api_secret = bot_config.exchange_api_key.api_secret
+    session.close()
+
+    class GateWebSocketApp(WebSocketApp):
+        def __init__(self, url, api_key, api_secret, **kwargs):
+            super(GateWebSocketApp, self).__init__(url, **kwargs)
+            self._api_key = api_key
+            self._api_secret = api_secret
+
+        def get_sign(self, channel, event, timestamp):
+            message = f"channel={channel}&event={event}&time={timestamp}"
+            h = hmac.new(self._api_secret.encode("utf8"), message.encode("utf8"), hashlib.sha512)
+            return h.hexdigest()
+
+        def send_auth_request(self):
+            timestamp = int(time.time())
+            auth_data = {
+                "time": timestamp,
+                "channel": "spot.usertrades",
+                "event": "subscribe",
+                "payload": [channel_symbol],
+                "auth": {
+                    "method": "api_key",
+                    "KEY": self._api_key,
+                    "SIGN": self.get_sign("spot.usertrades", "subscribe", timestamp),
+                }
+            }
+            self.send(json.dumps(auth_data))
+            logger.info("🔐 Sent authentication request.")
+
     def on_open(ws):
-        logger.info(f"✅ Gate.io WebSocket connected to {ws_url}")
-        subscription_message = json.dumps({
-            "time": int(time.time()),
-            "channel": "spot.tickers",
-            "event": "subscribe",
-            "payload": [channel_symbol]
-        })
-        ws.send(subscription_message)
-        logger.info(f"Subscribed to spot/ticker channel for {channel_symbol}")
+        logger.info("✅ Gate.io WebSocket connected.")
+        ws.send_auth_request()
 
-    def on_close(ws, close_status_code, close_msg):
-        logger.info(f"❌ Gate.io WebSocket closed: {close_status_code}, {close_msg}")
-        if not getattr(ws, "auto_reconnect", True):
-            logger.info("Forced closure detected; closing orders.")
-            close_and_sell_all(exchange_instance, symbol)
-        else:
-            logger.info("Connection lost but auto-reconnect is enabled; preserving orders.")
-        if not getattr(ws, "auto_reconnect", True):
-            logger.info("Forced closure; not attempting to reconnect.")
-            return
-        reconnect_delay = 5  # seconds
-        logger.info(f"Attempting to reconnect in {reconnect_delay} seconds...")
-        threading.Timer(
-            reconnect_delay,
-            lambda: start_gateio_websocket(
-                exchange_instance, symbol, bot_config_id, amount,
-                step_size, tick_size, min_notional,
-                sl_buffer_percent, sell_rebound_percent,
-                auto_reconnect=auto_reconnect
-            )
-        ).start()
-
-    def on_error(ws, error):
-        logger.error(f"🚨 Gate.io WebSocket error: {error}")
-        # If auto-reconnect is enabled, force closure to trigger on_close
-        if getattr(ws, "auto_reconnect", True):
-            ws.close()
-            
     def on_message(ws, message):
         session = None
         try:
             data = json.loads(message)
-
-            # ✅ Ignore subscription confirmation messages
-            if "event" in data and data["event"] == "subscribe":
-                logger.info(f"✅ Subscription confirmed for {data.get('payload', [])}")
-                return
-            
-            # ✅ Ensure the message is a price update
-            if "result" not in data or "last" not in data["result"]:
-                logger.info(f"🔍 Ignored message: {data}")  # Debugging
-                return
-            
-            ticker = data["result"]
-            current_price = float(ticker["last"])
-
-            session = SessionLocal()
-            bot_config = session.query(models.ExchangeBotConfig)\
-                                .filter(models.ExchangeBotConfig.id == bot_config_id)\
-                                .first()
-            if not bot_config:
-                logger.error(f"⚠️ Bot config with ID {bot_config_id} not found.")
-                return
-
-            tp_levels = json.loads(bot_config.tp_levels_json)
-            sl_levels = json.loads(bot_config.sl_levels_json)
-            
-            for i in range(len(tp_levels)):  
-                    if current_price >= tp_levels[i]:  
-                        logger.info(f"GateIO TP Level: {tp_levels}")
-                        triggered_tp = tp_levels.pop(i)  # ✅ Remove the TP hit
-                        bot_config.tp_levels_json = json.dumps(tp_levels)
-                        logger.info(f"GateIO Level dumped, current TP Levels: {bot_config.tp_levels_json}")
-                        session.commit()
-                        logger.info(f"🎯 Price {current_price} hit TP {triggered_tp}")
-
-                        # ✅ If `i == 0`, we hit the **highest** TP -> reset the grid
-                        if i == 0:  
-                            logger.info("All TPs filled! -> Resetting grid after delay.")
-                            try:
-                                open_orders = exchange_instance.fetch_open_orders(symbol)
-                                for order in open_orders:
-                                    exchange_instance.cancel_order(order['id'], symbol)
-                                    logger.info(f"🛑 Cancelled order {order['id']}")
-                            except Exception as e:
-                                logger.error(f"❌ Error cancelling orders: {e}")
-                            
-                            initialize_orders(
-                                exchange_instance,
-                                symbol,
-                                amount,
-                                bot_config.tp_percent,
-                                bot_config.sl_percent,
-                                step_size,
-                                tick_size,
-                                min_notional,
-                                session,
-                                bot_config
-                            )
-                            return  # ✅ Stop further TP processing (Grid Reset)
-
-                        else:  
-                            # ✅ Place a new SL based on the TP hit
-                            new_sl_price = round_price(triggered_tp * (1 - sl_buffer_percent / 100), tick_size)
-
-                            if sl_levels:
-                                last_sl = min(sl_levels)  # Get the lowest SL
-                                try:
-                                    open_orders = exchange_instance.fetch_open_orders(symbol)
-                                    for order in open_orders:
-                                        if order['price'] == last_sl:
-                                            exchange_instance.cancel_order(order['id'], symbol)
-                                            logger.info(f"🛑 Cancelled lowest SL order {order['id']} at {last_sl}")
-                                            break  
-                                except Exception as e:
-                                    logger.error(f"❌ Error cancelling SL orders: {e}")
-
-                                # ✅ Remove the old SL from the array
-                                sl_levels.remove(last_sl)
-
-                            # ✅ Add new SL at position 0 (since it's the highest SL now)
-                            sl_levels.insert(0, new_sl_price)
-
-                            # ✅ Place new limit buy order at new SL level
-                            threading.Timer(0.5, place_limit_buys, args=(
-                                exchange_instance, symbol, amount, [new_sl_price], tick_size, min_notional
-                            )).start()
-
-                            logger.info(f"📈 New SL placed at {new_sl_price}")
-
-                            # ✅ Update SL levels in bot config
-                            bot_config.sl_levels_json = json.dumps(sl_levels)
-                            session.commit()
-
-                        break  # ✅ Stop after processing the first TP hit
-
-
-            for sl_price in sl_levels:
-                if current_price <= sl_price:
-                    logger.info(f"⚠️ Price {current_price} hit SL {sl_price} -> Placing new SL & Sell orders after delay.")
-                    last_sl = min(sl_levels)
-                    new_sl_price = round_price(last_sl * (1 - sl_buffer_percent / 100), tick_size)
-                    new_sell_price = round_price(sl_price * (1 + sell_rebound_percent / 100), tick_size)
-                    logger.info(f"🔁 New SL @ {new_sl_price} | New Sell @ {new_sell_price}")
-                    base_asset, _ = symbol.split('/')
-                    balance = exchange_instance.fetch_balance()
-                    base_balance = balance.get(base_asset, {}).get('free')
-                    threading.Timer(0.5, place_limit_buys, args=(
-                        exchange_instance, symbol, amount, [new_sl_price], step_size, min_notional
-                    )).start()
-                    threading.Timer(0.5, place_limit_sell, args=(
-                        exchange_instance, symbol, base_balance, new_sell_price, step_size
-                    )).start()
-                    sl_levels.remove(sl_price)
-                    sl_levels.append(new_sl_price)
-                    sl_levels.sort(reverse=True)
-                    bot_config.sl_levels_json = json.dumps(sl_levels)
-                    
-                    # ★★★ Add your new sell price to TP array so it's tracked in on_message
-                    tp_levels = json.loads(bot_config.tp_levels_json)
-                    tp_levels.append(new_sell_price)
-                    # If your code expects TPs in descending order, do this:
-                    tp_levels.sort(reverse=True)  
-                    # If it expects ascending, remove "reverse=True".
-                    bot_config.tp_levels_json = json.dumps(tp_levels)
-
-                    session.commit()
-                    break
-
-
+            if "result" in data and isinstance(data["result"], list) and data["result"]:
+                trade = data["result"][0]
+                current_price = float(trade["price"])
+                process_order_update(exchange_instance, symbol, bot_config_id, amount, step_size, tick_size, min_notional, sl_buffer_percent, sell_rebound_percent, current_price)
         except Exception as e:
             logger.error(f"❌ Error processing Gate.io WebSocket message: {e}")
-        finally:
-            if session is not None:
-                session.close()
 
-    def close_and_sell_all(exchange_instance, symbol):
-        try:
-            open_orders = exchange_instance.fetch_open_orders(symbol)
-            for order in open_orders:
-                exchange_instance.cancel_order(order['id'], symbol)
-                logger.info(f"🛑 Cancelled order {order['id']}")
-            base_asset, _ = symbol.split('/')
-            balance = exchange_instance.fetch_balance()
-            base_balance = balance.get(base_asset, {}).get('free')
-            if base_balance > 0:
-                sell_order = exchange_instance.create_market_sell_order(symbol, base_balance)
-                logger.info(f"💰 Sold {base_balance} {base_asset} for USDT")
-            else:
-                logger.info(f"⚠️ No {base_asset} balance to sell.")
-        except Exception as e:
-            logger.error(f"❌ Error during close_and_sell_all: {e}")
+    def on_close(ws, close_status_code, close_msg):
+        logger.warning(f"❌ Gate.io WebSocket Closed: {close_status_code}, {close_msg}")
+        reconnect_delay = 5
+        logger.info(f"🔄 Reconnecting in {reconnect_delay} seconds...")
+        threading.Timer(reconnect_delay, connect_websocket).start()
 
-    ws = websocket.WebSocketApp(
-        ws_url,
-        on_open=on_open,
-        on_close=on_close,
-        on_error=on_error,
-        on_message=on_message
-    )
-    ws.auto_reconnect = auto_reconnect
-    wst = threading.Thread(target=ws.run_forever, daemon=True)
-    wst.start()
+    def on_error(ws, error):
+        logger.error(f"🚨 Gate.io WebSocket Error: {error}")
+        if auto_reconnect:
+            ws.close()
+
+    def connect_websocket():
+        ws = GateWebSocketApp(
+            ws_url,
+            api_key,
+            api_secret,
+            on_open=on_open,
+            on_message=on_message,
+            on_close=on_close,
+            on_error=on_error,
+        )
+        ws.run_forever()
+    
+    threading.Thread(target=connect_websocket, daemon=True).start()
     logger.info(f"🚀 Started Gate.io WebSocket for {symbol}. Listening for price movements...")
+
+
+
+
+def start_bybit_websocket(exchange_instance, symbol, bot_config_id, amount,
+                          step_size, tick_size, min_notional, 
+                          sl_buffer_percent=2.0, sell_rebound_percent=1.5,
+                          auto_reconnect=True, db_session=None):
+    """
+    Starts a Bybit WebSocket connection for SPOT orders.
+    """
+    session = db_session or SessionLocal()
+    bot_config = session.query(models.ExchangeBotConfig).filter(models.ExchangeBotConfig.id == bot_config_id).first()
+
+    if not bot_config or not bot_config.exchange_api_key:
+        logger.error(f"❌ No API key found for exchange {exchange_instance.id}. Please create an API key first.")
+        session.close()
+        return None
+
+    api_key = bot_config.exchange_api_key.api_key
+    api_secret = bot_config.exchange_api_key.api_secret
+    session.close()
+
+    def handle_message(message):
+        try:
+            if "data" in message and isinstance(message["data"], list) and message["data"]:
+                order_data = message["data"][0]
+                order_status = order_data.get("orderStatus")
+                order_symbol = order_data.get("symbol")
+                
+                if order_symbol == symbol and order_status in ["Filled", "PartiallyFilledCanceled"]:
+                    current_price = float(order_data.get("price", order_data.get("avgPrice", 0)))
+                    process_order_update(exchange_instance, symbol, bot_config_id, amount, step_size, 
+                                         tick_size, min_notional, sl_buffer_percent, sell_rebound_percent, current_price)
+        except Exception as e:
+            logger.error(f"❌ Error processing Bybit WebSocket message: {e}")
+
+    logger.info("🚀 Connecting to Bybit WebSocket...")
+
+    ws = WebSocket(
+        testnet=False,  # Change to True if using Bybit Testnet
+        channel_type="private",
+        api_key=api_key,
+        api_secret=api_secret
+    )
+
+    logger.info("✅ WebSocket Connected. Subscribing to SPOT order updates...")
+
+    # Subscribe to SPOT orders
+    ws.order_stream(callback=handle_message)
+
     return ws
 
-###
+def process_order_update(exchange_instance, symbol, bot_config_id, amount, step_size,
+                            tick_size, min_notional, sl_buffer_percent, sell_rebound_percent, current_price):
+    session = None
+    try:
+        session = SessionLocal()
+        bot_config = session.query(models.ExchangeBotConfig).filter(models.ExchangeBotConfig.id == bot_config_id).first()
+        if not bot_config:
+            logger.error(f"⚠️ Bot config with ID {bot_config_id} not found.")
+            return
+
+        tp_levels = json.loads(bot_config.tp_levels_json)
+        sl_levels = json.loads(bot_config.sl_levels_json)
+
+        for i in range(len(tp_levels)):
+            if current_price >= tp_levels[i]:
+                triggered_tp = tp_levels.pop(i)
+                bot_config.tp_levels_json = json.dumps(tp_levels)
+                session.commit()
+                logger.info(f"🎯 Price {current_price} hit TP {triggered_tp}")
+
+                if i == 0:
+                    initialize_orders(
+                        exchange_instance,
+                        symbol,
+                        amount,
+                        bot_config.tp_percent,
+                        bot_config.sl_percent,
+                        step_size,
+                        tick_size,
+                        min_notional,
+                        session,
+                        bot_config
+                    )
+                    return
+
+                new_sl_price = round_price(triggered_tp * (1 - sl_buffer_percent / 100), tick_size)
+
+                if sl_levels:
+                    last_sl = min(sl_levels)
+                    sl_levels.remove(last_sl)
+                
+                sl_levels.insert(0, new_sl_price)
+                threading.Timer(0.5, place_limit_buys, args=(exchange_instance, symbol, amount, [new_sl_price], tick_size, min_notional)).start()
+                bot_config.sl_levels_json = json.dumps(sl_levels)
+                session.commit()
+                break
+
+        for sl_price in sl_levels:
+            if current_price <= sl_price:
+                last_sl = min(sl_levels)
+                new_sl_price = round_price(last_sl * (1 - sl_buffer_percent / 100), tick_size)
+                new_sell_price = round_price(sl_price * (1 + sell_rebound_percent / 100), tick_size)
+                base_asset, _ = symbol.split('/')
+                balance = exchange_instance.fetch_balance()
+                base_balance = balance.get(base_asset, {}).get('free')
+                
+                threading.Timer(0.5, place_limit_buys, args=(exchange_instance, symbol, amount, [new_sl_price], step_size, min_notional)).start()
+                threading.Timer(0.5, place_limit_sell, args=(exchange_instance, symbol, base_balance, new_sell_price, step_size)).start()
+                
+                sl_levels.remove(sl_price)
+                sl_levels.append(new_sl_price)
+                sl_levels.sort(reverse=True)
+                bot_config.sl_levels_json = json.dumps(sl_levels)
+
+                tp_levels.append(new_sell_price)
+                tp_levels.sort(reverse=True)
+                bot_config.tp_levels_json = json.dumps(tp_levels)
+                session.commit()
+                break
+    except Exception as e:
+        logger.error(f"❌ Error processing order update: {e}")
+    finally:
+        if session:
+            session.close()
