@@ -881,6 +881,15 @@ def process_order_update(exchange_instance, symbol, bot_config_id, amount, step_
                 logger.info(f"🎯 Price {current_price} hit TP {triggered_tp}")
 
                 if i == 0:
+                    logger.info("All TPs filled! -> Resetting grid after delay.")
+                    try:
+                        open_orders = exchange_instance.fetch_open_orders(symbol)
+                        for order in open_orders:
+                            exchange_instance.cancel_order(order['id'], symbol)
+                            logger.info(f"🛑 Cancelled order {order['id']}")
+                    except Exception as e:
+                        logger.error(f"❌ Error cancelling orders: {e}")
+                    
                     initialize_orders(
                         exchange_instance,
                         symbol,
