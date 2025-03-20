@@ -77,9 +77,11 @@ class GridBot:
                 
                 # Corrected stop method
                 if hasattr(ws, "stop"):
-                    ws.stop()  # Properly stop the WebSocket
+                    ws.stop()
+                elif hasattr(ws, "close"):
+                    ws.close()
                 else:
-                    logger.warning(f"WebSocket object for {key} has no 'stop' method.")
+                    logger.warning("WebSocket has no valid termination method.")
                     
                 del self.websocket_connections[key]
             except Exception as e:

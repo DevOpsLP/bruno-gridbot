@@ -602,21 +602,26 @@ def start_bitmart_websocket(exchange_instance, symbol, bot_config_id, amount,
         """Handles WebSocket closure"""
         logger.info(f"❌ BitMart WebSocket closed for {symbol}. Reason: {close_reason}")
 
-        # ✅ Stop WebSocket connection unconditionally
-        ws.stop()
-
-        # If auto-reconnect is OFF, forcibly close orders and stop
+        if not hasattr(ws, "is_stopping"):
+            ws.is_stopping = True  # Prevent multiple stops
+        
+            try:
+                if hasattr(ws, "stop"):
+                    ws.stop()  # Properly stop the WebSocket
+                else:
+                    logger.warning(f"WebSocket object for {symbol} has no 'stop' method.")
+            except Exception as e:
+                logger.error(f"Error stopping WebSocket: {e}")
+        
         if not auto_reconnect:
             logger.info("Forced closure detected; closing orders.")
             close_and_sell_all(exchange_instance, symbol)
-            return  # No reconnect
+            return
 
         logger.info("Connection lost but auto-reconnect is enabled; preserving orders.")
-        
+
         reconnect_delay = 5  # seconds
         logger.info(f"Attempting to reconnect in {reconnect_delay} seconds...")
-
-        # Create an all-new SpotSocketClient instance
         threading.Timer(
             reconnect_delay,
             lambda: start_bitmart_websocket(
@@ -652,7 +657,7 @@ def start_bitmart_websocket(exchange_instance, symbol, bot_config_id, amount,
     my_client.login(timeout=5)
     
     logger.info(f"📡 Subscribing to order updates for {symbol}...")
-    my_client.subscribe(args=f"spot/user/orders:{symbol.replace(',', '_')}")
+    my_client.subscribe(args=f"spot/user/orders:{symbol.replace('/', '_')}")
 
     return my_client
 
