@@ -657,7 +657,7 @@ def start_bitmart_websocket(exchange_instance, symbol, bot_config_id, amount,
     my_client.login(timeout=5)
     
     logger.info(f"📡 Subscribing to order updates for {symbol}...")
-    my_client.subscribe(args=f"spot/user/orders:{symbol.replace('/', '_')}")
+    my_client.subscribe(args=f"spot/user/order:{symbol.replace('/', '_')}")
 
     return my_client
 
