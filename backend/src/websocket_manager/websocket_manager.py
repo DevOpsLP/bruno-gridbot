@@ -246,13 +246,13 @@ def place_limit_sell(exchange, symbol, amount, price, step_size):
         order = exchange.create_limit_sell_order(symbol, float(amount), float(price), params=params)
         if order and isinstance(order, dict) and "price" in order:
             final_price = float(order["price"])
-            logger.info(f"Limit sell placed: {amount} @ {final_price}")
+            logger.info(f"{exchange.id}: Limit sell placed: {amount} @ {final_price}")
             return final_price
         else:
             logger.error(f"Limit sell order creation returned unexpected response: {order}")
             return float(price)  # Fallback
     except Exception as e:
-        logger.error(f"Limit sell error {amount} @ {price}: {repr(e)}")
+        logger.error(f"{exchange.id}: Limit sell error {amount} @ {price}: {repr(e)}")
         return float(price)  # Fallback
     
     
@@ -272,13 +272,13 @@ def place_limit_buys(exchange, symbol, total_usdt, prices, step_size, min_notion
                 order = exchange.create_limit_buy_order(symbol, float(amount), float(p), params=params)
                 if order and isinstance(order, dict) and "price" in order:
                     final_price = float(order["price"])
-                    logger.info(f"Limit buy placed: {amount} @ {final_price}")
+                    logger.info(f"{exchange.id}: Limit buy placed: {amount} @ {final_price}")
                     final_prices.append(final_price)
                 else:
                     logger.error(f"Limit buy order creation returned unexpected response: {order}")
                     final_prices.append(float(p))  # Fallback
             except Exception as e:
-                logger.error(f"Limit buy error @ {p}: {repr(e)}")
+                logger.error(f"{exchange.id}: Limit buy error @ {p}: {repr(e)}")
                 final_prices.append(float(p))  # Convert Decimal back to float for consistency
         else:
             logger.warning(f"Skipping SL @ {p} due to min_notional check.")
@@ -893,7 +893,7 @@ def start_bybit_websocket(exchange_instance, symbol, bot_config_id, amount,
     return ws
 
 def process_order_update(exchange_instance, symbol, bot_config_id, amount, step_size,
-                            tick_size, min_notional, sl_buffer_percent, sell_rebound_percent, current_price):
+                         tick_size, min_notional, sl_buffer_percent, sell_rebound_percent, current_price):
     session = None
     try:
         session = SessionLocal()
@@ -912,6 +912,7 @@ def process_order_update(exchange_instance, symbol, bot_config_id, amount, step_
                 session.commit()
                 logger.info(f"🎯 Price {current_price} hit TP {triggered_tp}")
 
+                # If i == 0, it means that was the last TP
                 if i == 0:
                     logger.info("All TPs filled! -> Resetting grid after delay.")
                     try:
@@ -938,16 +939,43 @@ def process_order_update(exchange_instance, symbol, bot_config_id, amount, step_
 
                 new_sl_price = round_price(triggered_tp * (1 - sl_buffer_percent / 100), tick_size)
 
+                # Here we remove the old SL and cancel it before placing the new SL
                 if sl_levels:
                     last_sl = min(sl_levels)
                     sl_levels.remove(last_sl)
-                
+
+                    # Cancel the buy order matching last_sl
+                    try:
+                        open_orders = exchange_instance.fetch_open_orders(symbol)
+                        buy_orders = [o for o in open_orders if o.get('side', '').lower() == 'buy']
+                        tolerance = 1e-8
+                        order_to_cancel = None
+                        for o in buy_orders:
+                            if abs(float(o.get('price', 0)) - last_sl) < tolerance:
+                                order_to_cancel = o
+                                break
+
+                        if order_to_cancel:
+                            exchange_instance.cancel_order(order_to_cancel['id'], symbol)
+                            logger.info(f"🛑 Cancelled last SL buy order {order_to_cancel['id']} @ {order_to_cancel['price']}")
+                        else:
+                            logger.warning(f"⚠️ No buy order found matching price {last_sl}")
+                    except Exception as e:
+                        logger.error(f"❌ Error cancelling last SL buy order @ {last_sl}: {e}")
+
                 sl_levels.insert(0, new_sl_price)
-                threading.Timer(0.5, place_limit_buys, args=(exchange_instance, symbol, amount, [new_sl_price], tick_size, min_notional)).start()
+                # Place the new limit buy in 0.5s
+                threading.Timer(
+                    0.5,
+                    place_limit_buys,
+                    args=(exchange_instance, symbol, amount, [new_sl_price], tick_size, min_notional)
+                ).start()
+
                 bot_config.sl_levels_json = json.dumps(sl_levels)
                 session.commit()
                 break
 
+        # SL logic remains unchanged
         for sl_price in sl_levels:
             if current_price <= sl_price:
                 last_sl = min(sl_levels)
@@ -955,10 +983,18 @@ def process_order_update(exchange_instance, symbol, bot_config_id, amount, step_
                 new_sell_price = round_price(sl_price * (1 + sell_rebound_percent / 100), tick_size)
                 base_asset, _ = symbol.split('/')
                 balance = exchange_instance.fetch_balance()
-                base_balance = balance.get(base_asset, {}).get('free')
+                base_balance = balance.get(base_asset, {}).get('free', 0)
                 
-                threading.Timer(0.5, place_limit_buys, args=(exchange_instance, symbol, amount, [new_sl_price], step_size, min_notional)).start()
-                threading.Timer(0.5, place_limit_sell, args=(exchange_instance, symbol, base_balance, new_sell_price, step_size)).start()
+                threading.Timer(
+                    0.5,
+                    place_limit_buys,
+                    args=(exchange_instance, symbol, amount, [new_sl_price], step_size, min_notional)
+                ).start()
+                threading.Timer(
+                    0.5,
+                    place_limit_sell,
+                    args=(exchange_instance, symbol, base_balance, new_sell_price, step_size)
+                ).start()
                 
                 sl_levels.remove(sl_price)
                 sl_levels.append(new_sl_price)
@@ -970,12 +1006,13 @@ def process_order_update(exchange_instance, symbol, bot_config_id, amount, step_
                 bot_config.tp_levels_json = json.dumps(tp_levels)
                 session.commit()
                 break
+
     except Exception as e:
         logger.error(f"❌ Error processing order update: {e}")
     finally:
         if session:
             session.close()
-
+            
 def close_and_sell_all(exchange_instance, symbol):
     try:
         open_orders = exchange_instance.fetch_open_orders(symbol)
