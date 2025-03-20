@@ -819,6 +819,7 @@ def start_bybit_websocket(exchange_instance, symbol, bot_config_id, amount,
     def handle_message(message):
         """Processes incoming order messages from Bybit WebSocket."""
         try:
+            logger.info(f"📡 Bybit WebSocket message: {message}")
             if isinstance(message, dict) and "data" in message and isinstance(message["data"], list) and message["data"]:
                 order_data = message["data"][0]
                 order_status = order_data.get("orderStatus")
