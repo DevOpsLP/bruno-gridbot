@@ -825,18 +825,31 @@ def start_bybit_websocket(exchange_instance, symbol, bot_config_id, amount,
         """Processes incoming order messages from Bybit WebSocket."""
         try:
             logger.info(f"📡 Bybit WebSocket message: {message}")
-            if isinstance(message, dict) and "data" in message and isinstance(message["data"], list) and message["data"]:
-                order_data = message["data"][0]
-                order_status = order_data.get("orderStatus")
-                order_symbol = order_data.get("symbol")
 
-                if order_symbol == symbol and order_status in ["Filled", "PartiallyFilledCanceled"]:
-                    current_price = float(order_data.get("price", order_data.get("avgPrice", 0)))
-                    process_order_update(exchange_instance, symbol, bot_config_id, amount, step_size, 
-                                         tick_size, min_notional, sl_buffer_percent, sell_rebound_percent, current_price)
+            # Ensure message structure is valid
+            if not isinstance(message, dict) or "data" not in message:
+                logger.warning("Received invalid message format.")
+                return
+
+            if not isinstance(message["data"], list) or not message["data"]:
+                logger.warning("Received empty data from WebSocket.")
+                return
+
+            order_data = message["data"][0]
+            order_status = order_data.get("orderStatus", order_data.get("status", ""))
+            order_symbol = order_data.get("symbol", "").replace("/", "")  # Normalize symbol
+
+            # Normalize `symbol` before comparing
+            if order_symbol == symbol.replace("/", "") and order_status in ["Filled", "PartiallyFilledCanceled"]:
+                current_price = float(order_data.get("price", 0))  # Default to "price"
+
+                logger.info(f"✅ Order processed: {order_symbol} at price {current_price}")
+                process_order_update(
+                    exchange_instance, symbol, bot_config_id, amount, step_size,
+                    tick_size, min_notional, sl_buffer_percent, sell_rebound_percent, current_price
+                )
         except Exception as e:
             logger.error(f"❌ Error processing Bybit WebSocket message: {e}")
-
     def on_close():
         """Handles WebSocket closure logic."""
         logger.info(f"❌ Bybit WebSocket closed for {symbol}")
