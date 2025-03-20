@@ -841,7 +841,9 @@ def start_bybit_websocket(exchange_instance, symbol, bot_config_id, amount,
 
             # Normalize `symbol` before comparing
             if order_symbol == symbol.replace("/", "") and order_status in ["Filled", "PartiallyFilledCanceled"]:
-                current_price = float(order_data.get("price", 0))  # Default to "price"
+                current_price = float(order_data.get("price", 0))
+                if current_price == 0:
+                    current_price = float(order_data.get("avgPrice", current_price))
 
                 logger.info(f"✅ Order processed: {order_symbol} at price {current_price}")
                 process_order_update(
