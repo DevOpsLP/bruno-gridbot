@@ -68,12 +68,19 @@ class GridBot:
         if not keys_to_stop:
             logger.info(f"No active WebSocket for symbol {symbol}.")
             return
+
         for key in keys_to_stop:
             ws = self.websocket_connections.get(key)
             try:
                 logger.info(f"Closing WebSocket for {key}")
                 ws.auto_reconnect = False  # Force no reconnection
-                ws.close()
+                
+                # Corrected stop method
+                if hasattr(ws, "stop"):
+                    ws.stop()  # Properly stop the WebSocket
+                else:
+                    logger.warning(f"WebSocket object for {key} has no 'stop' method.")
+                    
                 del self.websocket_connections[key]
             except Exception as e:
                 logger.error(f"Error closing WebSocket for {key}: {e}")
