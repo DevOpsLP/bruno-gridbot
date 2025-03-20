@@ -969,6 +969,7 @@ def process_order_update(exchange_instance, symbol, bot_config_id, amount, step_
                     place_limit_buys,
                     args=(exchange_instance, symbol, amount, [new_sl_price], tick_size, min_notional)
                 ).start()
+                logger.info(f"{bot_config_id}: Checking stored TP: {tp_levels}, stored SL: {sl_levels}")
 
                 bot_config.sl_levels_json = json.dumps(sl_levels)
                 session.commit()
@@ -1004,6 +1005,8 @@ def process_order_update(exchange_instance, symbol, bot_config_id, amount, step_
                 tp_levels.sort(reverse=True)
                 bot_config.tp_levels_json = json.dumps(tp_levels)
                 session.commit()
+                logger.info(f"{bot_config_id}: Checking stored TP: {tp_levels}, stored SL: {sl_levels}")
+
                 break
 
     except Exception as e:
