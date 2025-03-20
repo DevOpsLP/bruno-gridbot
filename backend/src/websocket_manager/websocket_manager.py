@@ -825,6 +825,7 @@ def start_bybit_websocket(exchange_instance, symbol, bot_config_id, amount,
                 order_status = order_data.get("orderStatus")
                 order_symbol = order_data.get("symbol")
 
+                logger.info(f"📡 Bybit WebSocket message: {message}")
                 if order_symbol == symbol and order_status in ["Filled", "PartiallyFilledCanceled"]:
                     current_price = float(order_data.get("price", order_data.get("avgPrice", 0)))
                     process_order_update(exchange_instance, symbol, bot_config_id, amount, step_size, 
