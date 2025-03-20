@@ -870,7 +870,8 @@ def start_bybit_websocket(exchange_instance, symbol, bot_config_id, amount,
     ws = WebSocket(
         channel_type="private",
         api_key=api_key,
-        api_secret=api_secret
+        api_secret=api_secret,
+        testnet=False  # or True, depending on your environment
     )
 
     logger.info("✅ WebSocket Connected. Subscribing to SPOT order updates...")
