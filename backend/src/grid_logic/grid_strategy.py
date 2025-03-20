@@ -73,20 +73,28 @@ class GridBot:
             ws = self.websocket_connections.get(key)
             try:
                 logger.info(f"Closing WebSocket for {key}")
-                ws.auto_reconnect = False  # Force no reconnection
-                
-                # Corrected stop method
-                if hasattr(ws, "stop"):
+                # Turn off reconnect for your library
+                if hasattr(ws, "auto_reconnect"):
+                    ws.auto_reconnect = False
+                if hasattr(ws, "reconnection"):
+                    ws.reconnection = False  # Stop internal reconnection
+
+                # Now attempt to close properly
+                if hasattr(ws, "exit"):
+                    ws.exit()
+                elif hasattr(ws, "stop"):
                     ws.stop()
                 elif hasattr(ws, "close"):
                     ws.close()
                 else:
                     logger.warning("WebSocket has no valid termination method.")
-                    
+
+                # Remove it from the dictionary
                 del self.websocket_connections[key]
+
             except Exception as e:
                 logger.error(f"Error closing WebSocket for {key}: {e}")
-                
+
     def stop(self):
         """Stops all WebSocket connections."""
         logger.info("Stopping all WebSocket connections...")
