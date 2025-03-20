@@ -582,7 +582,6 @@ def start_bitmart_websocket(exchange_instance, symbol, bot_config_id, amount,
 
     def message_handler(message):
         try:
-            logger.info(f"📡 BitMart WebSocket message: {message}")
             if "data" in message and isinstance(message["data"], list) and message["data"]:
                 order_data = message["data"][0]
                 order_state = order_data.get("order_state")
@@ -825,12 +824,12 @@ def start_bybit_websocket(exchange_instance, symbol, bot_config_id, amount,
     def handle_message(message):
         """Processes incoming order messages from Bybit WebSocket."""
         try:
+            logger.info(f"📡 Bybit WebSocket message: {message}")
             if isinstance(message, dict) and "data" in message and isinstance(message["data"], list) and message["data"]:
                 order_data = message["data"][0]
                 order_status = order_data.get("orderStatus")
                 order_symbol = order_data.get("symbol")
 
-                logger.info(f"📡 Bybit WebSocket message: {message}")
                 if order_symbol == symbol and order_status in ["Filled", "PartiallyFilledCanceled"]:
                     current_price = float(order_data.get("price", order_data.get("avgPrice", 0)))
                     process_order_update(exchange_instance, symbol, bot_config_id, amount, step_size, 
