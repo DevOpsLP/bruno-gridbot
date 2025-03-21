@@ -210,7 +210,7 @@ def initialize_orders(exchange, symbol, amount, tp_percent, sl_percent,
         order_size = amount
     # --- Proceed with your market buy ---
     exchange.create_market_buy_order(symbol, order_size, params=params)
-    logger.info(f"Market buy executed: {order_size} {base_asset} @ {current_price}")
+    logger.info(f"{exchange.id}:r Market buy executed: {order_size} {base_asset} @ {current_price}")
 
     # The "intended" prices
     intended_tp = round_price(current_price * (1 + tp_percent / 100), tick_size)
@@ -597,7 +597,10 @@ def start_bitmart_websocket(exchange_instance, symbol, bot_config_id, amount,
                 order_data = msg["data"][0]
                 order_state = order_data.get("order_state")
                 if order_state in ["filled", "partially_filled"]:
-                    current_price = float(order_data.get("price") or order_data.get("last_fill_price", 0))
+                    price = float(order_data.get("price", 0))
+                    if price == 0:
+                        price = float(order_data.get("last_fill_price", 0))
+                    current_price = price
                     logger.info(f"BitMart WebSocket: {order_data.get('side')} has been triggered at {order_data.get('price')} vs current price {current_price} | Placing new orders")
                     process_order_update(
                         exchange_instance, symbol, bot_config_id, amount,
@@ -1108,7 +1111,7 @@ def process_order_update(exchange_instance, symbol, bot_config_id, amount, step_
                 tp_levels.sort(reverse=True)
                 bot_config.tp_levels_json = json.dumps(tp_levels)
                 session.commit()
-                logger.info(f"{bot_config_id}: Checking stored TP: {tp_levels}, stored SL: {sl_levels}")
+                logger.info(f"{exchange_instance.id}: Checking stored TP: {tp_levels}, stored SL: {sl_levels}")
 
                 break
 
