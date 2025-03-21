@@ -639,7 +639,6 @@ def start_bitmart_websocket(exchange_instance, symbol, bot_config_id, amount,
     def on_message(ws, message):
         # Check if we received a plain 'pong'
         if message.strip() == "pong":
-            logger.info("Received pong")
             ws.waiting_for_pong = False
             if hasattr(ws, "pong_timer") and ws.pong_timer is not None:
                 ws.pong_timer.cancel()
@@ -669,7 +668,7 @@ def start_bitmart_websocket(exchange_instance, symbol, bot_config_id, amount,
 
     def on_error(ws, error):
         logger.error(f"🚨 BitMart WebSocket error: {error}")
-        if auto_reconnect:
+        if not getattr(ws, "auto_reconnect", auto_reconnect):
             ws.close()
 
     def on_close(ws, close_status_code, close_msg):
@@ -679,10 +678,10 @@ def start_bitmart_websocket(exchange_instance, symbol, bot_config_id, amount,
         except Exception as e:
             logger.error(f"Error stopping WebSocket: {e}")
 
-        if not auto_reconnect:
+        if not getattr(ws, "auto_reconnect", auto_reconnect):
             logger.info("Forced closure detected; closing orders.")
             close_and_sell_all(exchange_instance, symbol)
-            return
+            return  # ✅ STOP execution, preventing reconnection
 
         logger.info("Connection lost but auto-reconnect is enabled; preserving orders.")
         reconnect_delay = 5  # seconds
@@ -836,7 +835,7 @@ def start_gateio_websocket(exchange_instance, symbol, bot_config_id, amount,
     def on_error(ws, error):
         """Handles WebSocket errors."""
         logger.error(f"🚨 Gate.io WebSocket Error: {error}")
-        if auto_reconnect:
+        if not getattr(ws, "auto_reconnect", auto_reconnect):
             ws.close()  # ✅ Trigger on_close()
 
     # ✅ Create WebSocket instance and return it
@@ -920,7 +919,6 @@ def start_bybit_websocket(exchange_instance, symbol, bot_config_id, amount,
 
     def on_message(ws, message):
         try:
-            logger.info(f"📡 Received WebSocket message: {message}")
             msg_json = json.loads(message)
 
             # Handle auth/subscription responses
@@ -933,7 +931,6 @@ def start_bybit_websocket(exchange_instance, symbol, bot_config_id, amount,
 
             # Process order updates
             if "data" not in msg_json or not isinstance(msg_json["data"], list) or not msg_json["data"]:
-                logger.warning("Received message with no data or invalid structure.")
                 return
 
             order_data = msg_json["data"][0]
@@ -968,10 +965,11 @@ def start_bybit_websocket(exchange_instance, symbol, bot_config_id, amount,
         except Exception as e:
             logger.error(f"Error during ws.close(): {e}")
 
-        if not auto_reconnect:
+        if not getattr(ws, "auto_reconnect", auto_reconnect):
             logger.info("Forced closure detected; closing orders.")
             close_and_sell_all(exchange_instance, symbol)
-            return
+            return  # ✅ STOP execution, preventing reconnection
+
 
         logger.info("Connection lost but auto-reconnect is enabled; preserving orders.")
         reconnect_delay = 5  # seconds
