@@ -587,7 +587,8 @@ def start_bitmart_websocket(exchange_instance, symbol, bot_config_id, amount,
                 order_state = order_data.get("order_state")
                 
                 if order_state in ["filled", "partially_filled"]:
-                    current_price = float(order_data.get("price", order_data.get("last_fill_price", 0)))
+                    current_price = float(order_data.get("price", order_data.get("last_fill_price")))
+                    print(f"BitMart WebSocket: {order_data["side"]} has been triggered at {order_data["price"]} vs current price {current_price} | Placing new orders")
                     process_order_update(
                         exchange_instance, symbol, bot_config_id, amount,
                         step_size, tick_size, min_notional, 
@@ -841,17 +842,21 @@ def start_bybit_websocket(exchange_instance, symbol, bot_config_id, amount,
 
             # Normalize `symbol` before comparing
             if order_symbol == symbol.replace("/", "") and order_status in ["Filled", "PartiallyFilledCanceled"]:
-                current_price = float(order_data.get("price", 0))
-                if current_price == 0:
-                    current_price = float(order_data.get("avgPrice", current_price))
+                price = order_data.get("price")
+                current_price = float(price) if price is not None else 0
 
-                logger.info(f"✅ Order processed: {order_symbol} at price {current_price}")
+                if current_price == 0:
+                    avg_price = order_data.get("avgPrice")
+                    if avg_price is not None:
+                        current_price = float(avg_price)
+                logger.info(f"✅ Order processed: {order_data} at price {current_price} vs Order prices: {order_data["price"]}")
                 process_order_update(
                     exchange_instance, symbol, bot_config_id, amount, step_size,
                     tick_size, min_notional, sl_buffer_percent, sell_rebound_percent, current_price
                 )
         except Exception as e:
             logger.error(f"❌ Error processing Bybit WebSocket message: {e}")
+            
     def on_close():
         """Handles WebSocket closure logic."""
         logger.info(f"❌ Bybit WebSocket closed for {symbol}")
