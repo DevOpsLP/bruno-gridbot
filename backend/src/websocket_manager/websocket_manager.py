@@ -502,12 +502,9 @@ def start_binance_websocket(exchange_instance, symbol, bot_config_id, amount,
         if not getattr(ws, "auto_reconnect", True):
             logger.info("Forced closure detected; closing orders.")
             close_and_sell_all(exchange_instance, symbol)
+            return
         else:
             logger.info("Connection lost but auto-reconnect is enabled; preserving orders.")
-
-        if not getattr(ws, "auto_reconnect", True):
-            logger.info("Forced closure; not attempting to reconnect.")
-            return
 
         reconnect_delay = 5  # seconds
         logger.info(f"Attempting to reconnect in {reconnect_delay} seconds...")
@@ -540,9 +537,9 @@ def start_binance_websocket(exchange_instance, symbol, bot_config_id, amount,
     return ws
 
 def start_bitmart_websocket(exchange_instance, symbol, bot_config_id, amount,
-                            step_size, tick_size, min_notional, 
-                            sl_buffer_percent=2.0, sell_rebound_percent=1.5,
-                            auto_reconnect=True, db_session=None):
+                              step_size, tick_size, min_notional, 
+                              sl_buffer_percent=2.0, sell_rebound_percent=1.5,
+                              auto_reconnect=True, db_session=None):
     """
     Starts a BitMart WebSocket connection with authentication.
     """
@@ -557,26 +554,20 @@ def start_bitmart_websocket(exchange_instance, symbol, bot_config_id, amount,
 
     api_key = bot_config.exchange_api_key.api_key
     api_secret = bot_config.exchange_api_key.api_secret
-    # Use the api_memo as defined in your original logic.
-    api_memo = "bua"
+    api_memo = "bua"  # as defined in your original logic
     session.close()
 
-    # Ping/Pong configuration (must be less than 20s).
+    # Ping/Pong configuration
     PING_INTERVAL = 15  # seconds to wait before sending a ping if no message is received.
     PONG_TIMEOUT = 15   # seconds to wait for a pong response.
 
     def generate_sign(timestamp: str, memo: str, secret: str) -> str:
-        """
-        Generate the BitMart signature:
-          sign = HMAC_SHA256(timestamp + "#" + memo + "#" + "bitmart.WebSocket", secret)
-        """
         message = f"{timestamp}#{memo}#bitmart.WebSocket"
         return hmac.new(secret.encode("utf-8"),
                         message.encode("utf-8"),
                         digestmod=hashlib.sha256).hexdigest()
 
     def reset_ping_timer(ws):
-        """Reset the ping timer so that if no message arrives within PING_INTERVAL, a ping is sent."""
         if hasattr(ws, "ping_timer") and ws.ping_timer is not None:
             ws.ping_timer.cancel()
         ws.ping_timer = threading.Timer(PING_INTERVAL, lambda: ping_handler(ws))
@@ -584,7 +575,6 @@ def start_bitmart_websocket(exchange_instance, symbol, bot_config_id, amount,
         ws.ping_timer.start()
 
     def ping_handler(ws):
-        """Send a 'ping' message and start a timer awaiting a 'pong' response."""
         try:
             ws.send("ping")
             ws.waiting_for_pong = True
@@ -595,23 +585,16 @@ def start_bitmart_websocket(exchange_instance, symbol, bot_config_id, amount,
             logger.error(f"Error sending ping: {e}")
 
     def pong_timeout_handler(ws):
-        """Called if no 'pong' is received within the timeout period."""
         if getattr(ws, "waiting_for_pong", False):
             logger.warning("Pong not received in time. Closing connection...")
             ws.close()
 
     def message_handler(msg):
-        """
-        Processes incoming order messages from BitMart WebSocket.
-        Expects 'data' in the message, and if an order is filled or partially filled,
-        calls process_order_update.
-        """
         try:
             if "data" in msg and isinstance(msg["data"], list) and msg["data"]:
                 order_data = msg["data"][0]
                 order_state = order_data.get("order_state")
                 if order_state in ["filled", "partially_filled"]:
-                    # Use 'price' or fallback to 'last_fill_price'
                     current_price = float(order_data.get("price") or order_data.get("last_fill_price", 0))
                     logger.info(f"BitMart WebSocket: {order_data.get('side')} has been triggered at {order_data.get('price')} vs current price {current_price} | Placing new orders")
                     process_order_update(
@@ -625,19 +608,14 @@ def start_bitmart_websocket(exchange_instance, symbol, bot_config_id, amount,
 
     def on_open(ws):
         logger.info("WebSocket opened, sending login message...")
-        # Generate a current timestamp in milliseconds.
         timestamp = str(int(time.time() * 1000))
         sign = generate_sign(timestamp, api_memo, api_secret)
-        login_payload = {
-            "op": "login",
-            "args": [api_key, timestamp, sign]
-        }
+        login_payload = {"op": "login", "args": [api_key, timestamp, sign]}
         ws.send(json.dumps(login_payload))
         logger.info(f"Login message sent: {login_payload}")
         reset_ping_timer(ws)
 
     def on_message(ws, message):
-        # Check if we received a plain 'pong'
         if message.strip() == "pong":
             ws.waiting_for_pong = False
             if hasattr(ws, "pong_timer") and ws.pong_timer is not None:
@@ -653,7 +631,6 @@ def start_bitmart_websocket(exchange_instance, symbol, bot_config_id, amount,
             reset_ping_timer(ws)
             return
 
-        # On successful login response, subscribe to the spot order channel.
         if msg.get("event") == "login":
             subscription_payload = {
                 "op": "subscribe",
@@ -662,13 +639,12 @@ def start_bitmart_websocket(exchange_instance, symbol, bot_config_id, amount,
             ws.send(json.dumps(subscription_payload))
             logger.info(f"Subscription message sent: {subscription_payload}")
 
-        # Process order update messages.
         message_handler(msg)
         reset_ping_timer(ws)
 
     def on_error(ws, error):
         logger.error(f"🚨 BitMart WebSocket error: {error}")
-        if not getattr(ws, "auto_reconnect", auto_reconnect):
+        if not getattr(ws, "auto_reconnect", False):
             ws.close()
 
     def on_close(ws, close_status_code, close_msg):
@@ -678,21 +654,23 @@ def start_bitmart_websocket(exchange_instance, symbol, bot_config_id, amount,
         except Exception as e:
             logger.error(f"Error stopping WebSocket: {e}")
 
-        if not getattr(ws, "auto_reconnect", auto_reconnect):
+        # Check the current instance attribute
+        if not getattr(ws, "auto_reconnect", False):
             logger.info("Forced closure detected; closing orders.")
             close_and_sell_all(exchange_instance, symbol)
-            return  # ✅ STOP execution, preventing reconnection
+            return
 
         logger.info("Connection lost but auto-reconnect is enabled; preserving orders.")
         reconnect_delay = 5  # seconds
         logger.info(f"Attempting to reconnect in {reconnect_delay} seconds...")
+        # When reconnecting, we always pass auto_reconnect=True because a new connection should be healthy.
         threading.Timer(
             reconnect_delay,
             lambda: start_bitmart_websocket(
                 exchange_instance, symbol, bot_config_id, amount,
                 step_size, tick_size, min_notional,
                 sl_buffer_percent, sell_rebound_percent,
-                auto_reconnect=auto_reconnect,
+                auto_reconnect=True,
                 db_session=db_session
             )
         ).start()
@@ -709,9 +687,7 @@ def start_bitmart_websocket(exchange_instance, symbol, bot_config_id, amount,
     # Run the WebSocket in a background thread so that the call is non-blocking.
     ws_thread = threading.Thread(target=lambda: ws_app.run_forever(), daemon=True)
     ws_thread.start()
-
     return ws_app
-
 
 def start_gateio_websocket(exchange_instance, symbol, bot_config_id, amount,
                            step_size, tick_size, min_notional, 
@@ -886,7 +862,7 @@ def start_bybit_websocket(exchange_instance, symbol, bot_config_id, amount,
                         digestmod=hashlib.sha256).hexdigest()
 
     def on_open(ws):
-        logger.info("🚀 WebSocket connection opened, sending auth and subscription...")
+        logger.info("🚀 Bybit WebSocket connection opened, sending auth and subscription...")
         # Authenticate
         expires = int((time.time() + 10) * 1000)  # Expires 10 seconds from now
         signature = generate_signature(api_secret, expires)
@@ -920,43 +896,47 @@ def start_bybit_websocket(exchange_instance, symbol, bot_config_id, amount,
     def on_message(ws, message):
         try:
             msg_json = json.loads(message)
-
-            # Handle auth/subscription responses
-            if "op" in msg_json and msg_json["op"] in ["auth", "subscribe"]:
-                if not msg_json.get("success", False):
-                    logger.error(f"❌ {msg_json['op']} failed: {msg_json.get('ret_msg', '')}")
-                else:
-                    logger.info(f"✅ {msg_json['op']} successful.")
-                return
-
-            # Process order updates
-            if "data" not in msg_json or not isinstance(msg_json["data"], list) or not msg_json["data"]:
-                return
-
-            order_data = msg_json["data"][0]
-            order_status = order_data.get("orderStatus", order_data.get("status", ""))
-            order_symbol = order_data.get("symbol", "").replace("/", "")
-
-            if order_symbol == symbol.replace("/", "") and order_status in ["Filled", "PartiallyFilledCanceled"]:
-                price = order_data.get("price")
-                current_price = float(price) if price is not None else 0.0
-
-                if current_price == 0:
-                    avg_price = order_data.get("avgPrice")
-                    if avg_price is not None:
-                        current_price = float(avg_price)
-                logger.info(f"✅ Order processed: {order_data} at price {current_price} vs Order price: {order_data.get('price')}")
-                process_order_update(
-                    exchange_instance, symbol, bot_config_id, amount, step_size,
-                    tick_size, min_notional, sl_buffer_percent, sell_rebound_percent, current_price
-                )
         except Exception as e:
-            logger.error(f"❌ Error processing WebSocket message: {e}")
+            logger.error(f"❌ Error parsing message: {e}")
+            return
+
+        # Handle auth/subscription responses.
+        if "op" in msg_json and msg_json["op"] in ["auth", "subscribe"]:
+            if not msg_json.get("success", False):
+                logger.error(f"❌ {msg_json['op']} failed: {msg_json.get('ret_msg', '')}")
+            else:
+                logger.info(f"✅ {msg_json['op']} successful.")
+            return
+
+        # Process order updates.
+        if "data" not in msg_json or not isinstance(msg_json["data"], list) or not msg_json["data"]:
+            return
+
+        order_data = msg_json["data"][0]
+        order_status = order_data.get("orderStatus", order_data.get("status", ""))
+        order_symbol = order_data.get("symbol", "").replace("/", "")
+
+        if order_symbol == symbol.replace("/", "") and order_status in ["Filled", "PartiallyFilledCanceled"]:
+            price = order_data.get("price")
+            current_price = float(price) if price is not None else 0.0
+
+            if current_price == 0:
+                avg_price = order_data.get("avgPrice")
+                if avg_price is not None:
+                    current_price = float(avg_price)
+            logger.info(f"✅ Order processed: {order_data} at price {current_price} vs Order price: {order_data.get('price')}")
+            process_order_update(
+                exchange_instance, symbol, bot_config_id, amount, 
+                step_size, tick_size, min_notional, 
+                sl_buffer_percent, sell_rebound_percent, current_price
+            )
 
     def on_error(ws, error):
         logger.error(f"🚨 WebSocket error: {error}")
-        if auto_reconnect:
+        if getattr(ws, "auto_reconnect", False):
             on_close(ws, None, str(error))
+        else:
+            ws.close()
 
     def on_close(ws, close_status_code, close_msg):
         logger.info(f"❌ WebSocket closed for {symbol} (code: {close_status_code}, msg: {close_msg})")
@@ -965,31 +945,29 @@ def start_bybit_websocket(exchange_instance, symbol, bot_config_id, amount,
         except Exception as e:
             logger.error(f"Error during ws.close(): {e}")
 
-        if not getattr(ws, "auto_reconnect", auto_reconnect):
+        # Check the current value of auto_reconnect.
+        if not getattr(ws, "auto_reconnect", False):
             logger.info("Forced closure detected; closing orders.")
             close_and_sell_all(exchange_instance, symbol)
-            return  # ✅ STOP execution, preventing reconnection
-
+            return  # Stop execution to prevent reconnection.
 
         logger.info("Connection lost but auto-reconnect is enabled; preserving orders.")
         reconnect_delay = 5  # seconds
         logger.info(f"Attempting to reconnect in {reconnect_delay} seconds...")
 
-        # Schedule reconnection by re-invoking start_bybit_websocket.
+        # When reconnecting, we pass auto_reconnect=True for a fresh connection.
         threading.Timer(
             reconnect_delay,
             lambda: start_bybit_websocket(
                 exchange_instance, symbol, bot_config_id, amount,
                 step_size, tick_size, min_notional,
                 sl_buffer_percent, sell_rebound_percent,
-                auto_reconnect=auto_reconnect,
+                auto_reconnect=True,
                 db_session=db_session
             )
         ).start()
 
     logger.info("🚀 Connecting to Bybit WebSocket via WebSocketApp...")
-
-    # Create the WebSocketApp instance.
     ws_app = websocket.WebSocketApp(
         ws_url,
         on_open=on_open,
@@ -998,7 +976,7 @@ def start_bybit_websocket(exchange_instance, symbol, bot_config_id, amount,
         on_close=on_close
     )
 
-    # Start the WebSocket in a background thread so that the main thread remains free.
+    # Start the WebSocket in a background thread.
     ws_thread = threading.Thread(target=lambda: ws_app.run_forever(), daemon=True)
     ws_thread.start()
 
