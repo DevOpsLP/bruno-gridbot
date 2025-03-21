@@ -11,6 +11,7 @@ from database import crud, models, schemas
 from database.database import SessionLocal
 from decimal import Decimal, ROUND_DOWN
 from websocket import WebSocketApp
+import zlib  # added for decompression
 
 logger = logging.getLogger(__name__)
 
@@ -536,6 +537,7 @@ def start_binance_websocket(exchange_instance, symbol, bot_config_id, amount,
     logger.info(f"🚀 Started Binance WebSocket for {symbol}. Listening for price movements...")
     return ws
 
+
 def start_bitmart_websocket(exchange_instance, symbol, bot_config_id, amount,
                               step_size, tick_size, min_notional, 
                               sl_buffer_percent=2.0, sell_rebound_percent=1.5,
@@ -616,6 +618,16 @@ def start_bitmart_websocket(exchange_instance, symbol, bot_config_id, amount,
         reset_ping_timer(ws)
 
     def on_message(ws, message):
+        # Decompress if message is binary (compressed)
+        if isinstance(message, bytes):
+            try:
+                # Negative window bits indicates raw DEFLATE stream
+                message = zlib.decompress(message, -zlib.MAX_WBITS).decode("utf-8")
+            except Exception as e:
+                logger.error(f"Error decompressing message: {e}")
+                reset_ping_timer(ws)
+                return
+
         if message.strip() == "pong":
             ws.waiting_for_pong = False
             if hasattr(ws, "pong_timer") and ws.pong_timer is not None:
