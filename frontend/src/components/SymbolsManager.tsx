@@ -29,13 +29,15 @@ export default function SymbolsManager() {
       if (data.symbols) {
         setSymbolRows(
           data.symbols.map((s: any) => ({
-            id: `${s.symbol}`, // Unique identifier for frontend (avoid duplicates)
+            id: s.symbol,
             symbol: s.symbol,
-            tp: s.configs.length > 0 ? s.configs[0].tp_percent : 2.0, // Use the first config
+            tp: s.configs.length > 0 ? s.configs[0].tp_percent : 2.0,
             sl: s.configs.length > 0 ? s.configs[0].sl_percent : 1.0,
-            running: false, // Will be updated dynamically later
+            running: false // We'll update this from the /status endpoint below
           }))
         );
+        // Now fetch the running/stopped status for each symbol
+        fetchRunningStatus();
       }
     } catch (err) {
       console.error("Error fetching stored symbols:", err);
@@ -53,24 +55,26 @@ export default function SymbolsManager() {
     }
   }
 
-  // ✅ Fetch active symbols to mark them as running
   async function fetchRunningStatus() {
     try {
       const resp = await fetch(`${API_URL}/grid-bot/status`);
       const data = await resp.json();
-      if (data.running_symbols) {
+      // The new route returns { global_status: ..., active_symbols: { [symbol]: 'running'|'stopped' } }
+      if (data.active_symbols) {
         setSymbolRows((prev) =>
-          prev.map((row) => ({
-            ...row,
-            running: data.running_symbols.includes(row.symbol),
-          }))
+          prev.map((row) => {
+            const status = data.active_symbols[row.symbol];
+            return {
+              ...row,
+              running: status === "running"
+            };
+          })
         );
       }
     } catch (err) {
       console.error("Error fetching running symbols:", err);
     }
   }
-
   // ✅ Add a new row (only in edit mode)
   function addNewRow() {
     if (!editMode) return;
@@ -165,7 +169,7 @@ export default function SymbolsManager() {
   }
 
   return (
-    <div className="p-4 border rounded-xl space-y-4 w-full">
+    <div className="p-4 shadow-xl rounded-xl space-y-4 w-full bg-gray-50">
       <div className="flex justify-between items-center">
         <h2 className="text-lg font-bold">Symbols Manager</h2>
         <button

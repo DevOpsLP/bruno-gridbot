@@ -10,7 +10,8 @@ from cryptography.hazmat.backends import default_backend
 import uvicorn
 import requests
 import logging 
-from typing import Optional
+import ccxt
+from typing import Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -137,9 +138,9 @@ def stop_symbol_endpoint(request: StopSymbolRequest):
 @app.get("/grid-bot/status")
 def get_grid_bot_status(symbol: Optional[str] = None):
     """
-    Returns the grid bot's global status and the active symbol(s) status.
-    If 'symbol' is provided, returns the status for that symbol;
-    otherwise, returns status for all active symbols.
+    Returns the grid bot's global status ('running' or 'stopped') and symbol-specific statuses.
+    If a symbol is provided, only return that symbol’s status.
+    Otherwise, return all symbols’ statuses.
     """
     global_status = "running" if grid_bot.running else "stopped"
     if symbol:
@@ -333,6 +334,35 @@ def get_usdc_usdt_symbols():
 
     except requests.exceptions.RequestException as e:
         raise HTTPException(status_code=500, detail=f"Error fetching Binance symbols: {str(e)}")
+
+# ---------------- # Portfolio Endpoints # ----------------
+
+
+@app.get("/portfolio", response_model=schemas.PortfolioResponse)
+def get_portfolio(db: Session = Depends(get_db)):
+    # Get all symbols from the database
+    symbols = crud.get_all_symbols(db)
+    portfolio_list = []
+    
+    for symbol in symbols:
+        # Get trade records for this symbol
+        trades = crud.get_trade_records_by_symbol(db, symbol.id)
+        
+        # Aggregate invested and received amounts based on trade side
+        total_invested = sum(trade.cost for trade in trades if trade.side.lower() == "buy")
+        total_received = sum(trade.cost for trade in trades if trade.side.lower() == "sell")
+        
+        # Simple PnL calculation (can be adjusted for fees and more complex logic)
+        pnl = total_received - total_invested
+
+        portfolio_list.append({
+            "symbol": symbol.symbol,
+            "totalInvested": total_invested,
+            "totalPnl": pnl,
+            "trades": trades
+        })
+
+    return {"portfolio": portfolio_list}
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

@@ -46,7 +46,7 @@ export default function SymbolRow({
     onUpdate(id, selectedSymbol, tpPercent, slPercent);
   };
   return (
-    <div className="flex items-center space-x-2 border p-2 rounded-xl mb-2 w-full">
+    <div className="flex items-center space-x-2  p-2 rounded-xl mb-2 w-full">
       {/* Symbol Dropdown */}
       <div className="relative w-full">
       <input
@@ -65,7 +65,7 @@ export default function SymbolRow({
         disabled={!editMode || isRunning
         }/>
         {searchTerm && (
-          <div className="absolute bg-white border rounded-md shadow-md w-full max-h-48 overflow-y-auto z-50">
+          <div className="absolute bg-white rounded-md shadow-md w-full max-h-48 overflow-y-auto z-50">
             {allSymbols
               .filter((s) => s.includes(searchTerm.toUpperCase()))
               .map((s) => (
@@ -87,7 +87,7 @@ export default function SymbolRow({
         <input
           type="number"
           step="0.1"
-          className="border rounded px-2 py-1 w-16"
+          className="border border-gray-300 rounded px-2 py-1 w-16"
           value={tpPercent}
           onChange={(e) => setTpPercent(parseFloat(e.target.value))}
           onBlur={handleUpdate} // ✅ Save when losing focus
@@ -101,7 +101,7 @@ export default function SymbolRow({
         <input
           type="number"
           step="0.1"
-          className="border rounded px-2 py-1 w-16"
+          className="border border-gray-300 rounded px-2 py-1 w-16"
           value={slPercent}
           onChange={(e) => setSlPercent(parseFloat(e.target.value))}
           onBlur={handleUpdate} // ✅ Save when losing focus

@@ -108,26 +108,27 @@ class GridBot:
 
     @property
     def running(self):
+        # If there's at least one active WebSocket, we call it 'running'
         return bool(self.websocket_connections)
 
     def get_symbol_status(self, symbol: str):
         """
         Returns 'running' if the WebSocket for the specified symbol is active,
-        otherwise returns 'stopped'.
+        otherwise 'stopped'.
         """
         for (exchange, sym), ws in self.websocket_connections.items():
             if sym == symbol:
+                # 'ws.sock.connected' is how the python 'websocket-client' tells you it's connected
                 return 'running' if ws.sock and ws.sock.connected else 'stopped'
         return 'stopped'
 
     def get_all_symbols_status(self):
         """
-        Returns a dictionary of all active symbols with their statuses ('running' or 'stopped').
+        Returns a dict of symbol -> 'running'/'stopped' for each active WebSocket.
         """
         status = {}
-        for (exchange, symbol), ws in self.websocket_connections.items():
-            status[symbol] = 'running' if ws.sock and ws.sock.connected else 'stopped'
+        for (exchange, sym), ws in self.websocket_connections.items():
+            status[sym] = 'running' if ws.sock and ws.sock.connected else 'stopped'
         return status
-
 # Global instance for API control
 grid_bot = GridBot()

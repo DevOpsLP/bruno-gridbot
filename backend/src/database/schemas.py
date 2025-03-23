@@ -1,5 +1,6 @@
 from pydantic import BaseModel
 from typing import Optional, List
+from datetime import datetime
 
 class APIKeyBase(BaseModel):
     exchange: str
@@ -44,3 +45,33 @@ class SymbolUpdate(BaseModel):
 
 class UpdateSymbolsRequest(BaseModel):
     symbols: List[SymbolUpdate]
+
+class TradeRecordBase(BaseModel):
+    exchange_api_key_id: int
+    symbol_id: int
+    order_id: Optional[str] = None
+    trade_id: Optional[str] = None
+    side: str
+    order_type: str
+    amount: float
+    price: float
+    fee: Optional[float] = 0.0
+    fee_currency: Optional[str] = None
+    cost: float
+    pnl: Optional[float] = 0.0
+
+class TradeRecord(TradeRecordBase):
+    id: int
+    created_at: datetime
+
+    class Config:
+        orm_mode = True
+
+class PortfolioSymbol(BaseModel):
+    symbol: str
+    totalInvested: float
+    totalPnl: float
+    trades: List[TradeRecord]
+
+class PortfolioResponse(BaseModel):
+    portfolio: List[PortfolioSymbol]

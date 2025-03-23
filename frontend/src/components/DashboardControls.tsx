@@ -24,7 +24,7 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="p-4">
+    <div>
       <div className="flex items-center space-x-4">
         <h1 className="text-2xl font-bold">Grid Bot Dashboard</h1>
         <ExchangesButton />

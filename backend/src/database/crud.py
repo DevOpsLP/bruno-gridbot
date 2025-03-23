@@ -125,3 +125,31 @@ def update_stored_levels(db: Session, config_id: int, tp_levels: list, sl_levels
         db.commit()
         db.refresh(bot_config)
     return bot_config
+
+# === TRADE RECORD MANAGEMENT ===
+def create_trade_record(db: Session, trade: schemas.TradeRecordBase):
+    db_trade = models.TradeRecord(
+        exchange_api_key_id=trade.exchange_api_key_id,
+        symbol_id=trade.symbol_id,
+        order_id=trade.order_id,
+        trade_id=trade.trade_id,
+        side=trade.side,
+        order_type=trade.order_type,
+        amount=trade.amount,
+        price=trade.price,
+        fee=trade.fee,
+        fee_currency=trade.fee_currency,
+        cost=trade.cost,
+        pnl=trade.pnl,
+    )
+    db.add(db_trade)
+    db.commit()
+    db.refresh(db_trade)
+    return db_trade
+
+def get_trade_records_by_symbol(db: Session, symbol_id: int, skip: int = 0, limit: int = 100):
+    return db.query(models.TradeRecord)\
+             .filter(models.TradeRecord.symbol_id == symbol_id)\
+             .offset(skip)\
+             .limit(limit)\
+             .all()

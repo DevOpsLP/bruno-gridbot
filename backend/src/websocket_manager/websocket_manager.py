@@ -231,7 +231,6 @@ def initialize_orders(exchange, symbol, amount, tp_percent, sl_percent,
     logger.info(f"Started Grid: TP Levels: {bot_config.tp_levels_json} / Stop Loss Levels: {bot_config.sl_levels_json} ")
     db_session.commit()
 
-
 def place_limit_sell(exchange, symbol, amount, price, step_size):
     amount = Decimal(str(amount)).quantize(Decimal(str(step_size)), rounding=ROUND_DOWN)  # Fix precision
     price = Decimal(str(price))  # Convert price to Decimal
@@ -252,7 +251,6 @@ def place_limit_sell(exchange, symbol, amount, price, step_size):
     except Exception as e:
         logger.error(f"{exchange.id}: Limit sell error {amount} @ {price}: {repr(e)}")
         return float(price)  # Fallback
-    
     
 def place_limit_buys(exchange, symbol, total_usdt, prices, step_size, min_notional):
     final_prices = []
@@ -285,18 +283,50 @@ def place_limit_buys(exchange, symbol, total_usdt, prices, step_size, min_notion
     return final_prices
 
 def get_binance_listen_key(api_key):
-    """Fetch listenKey from Binance User Data Stream API."""
-    headers = {"X-MBX-APIKEY": api_key}
-    response = requests.post(f"https://api.binance.com/api/v3/userDataStream", headers=headers)
-    data = response.json()
-
-    if "listenKey" in data:
+    """ Get a listenKey from Binance via POST /api/v3/userDataStream. """
+    url = "https://api.binance.com/api/v3/userDataStream"
+    headers = {
+        "X-MBX-APIKEY": api_key
+    }
+    try:
+        response = requests.post(url, headers=headers, timeout=5)
+        response.raise_for_status()
+        data = response.json()
         return data["listenKey"]
-    else:
-        raise Exception(f"Error fetching listenKey: {data}")
+    except Exception as e:
+        raise RuntimeError(f"Error fetching listenKey: {e}")
+
+def keepalive_binance_listen_key(api_key, listen_key):
+    """ Keep a listenKey alive via PUT /api/v3/userDataStream """
+    url = "https://api.binance.com/api/v3/userDataStream"
+    headers = {
+        "X-MBX-APIKEY": api_key
+    }
+    params = {
+        "listenKey": listen_key
+    }
+    try:
+        response = requests.put(url, headers=headers, params=params, timeout=5)
+        response.raise_for_status()
+        logger.info(f"✅ Successfully kept listenKey alive: {listen_key}")
+    except Exception as e:
+        logger.error(f"❌ Failed to keep listenKey alive: {e}")
+
+def schedule_listen_key_keepalive(api_key, listen_key, interval=1800):
+    """
+    Schedule the keep-alive call every `interval` seconds (default 30 min).
+    Continues until program exit or you stop it manually.
+    """
+    def keepalive_loop():
+        while True:
+            keepalive_binance_listen_key(api_key, listen_key)
+            time.sleep(interval)
+
+    t = threading.Thread(target=keepalive_loop, daemon=True)
+    t.start()
 
 def start_binance_websocket(exchange_instance, symbol, bot_config_id, amount,
-                            step_size, tick_size, min_notional, 
+                            step_size, tick_size, min_notional,
                             sl_buffer_percent=2.0, sell_rebound_percent=1.5,
                             auto_reconnect=True, db_session=None):
     """
@@ -305,7 +335,8 @@ def start_binance_websocket(exchange_instance, symbol, bot_config_id, amount,
 
     # ✅ Fetch bot config from the database
     session = db_session or SessionLocal()
-    bot_config = session.query(models.ExchangeBotConfig).filter(models.ExchangeBotConfig.id == bot_config_id).first()
+    bot_config = session.query(models.ExchangeBotConfig)\
+                        .filter(models.ExchangeBotConfig.id == bot_config_id).first()
 
     if not bot_config or not bot_config.exchange_api_key:
         logger.error(f"❌ No API key found for exchange {exchange_instance.id}. Please create an API key first.")
@@ -322,177 +353,49 @@ def start_binance_websocket(exchange_instance, symbol, bot_config_id, amount,
         session.close()
         return None
 
+    # ✅ Start the keep-alive scheduling in the background
+    schedule_listen_key_keepalive(api_key, listen_key, interval=1800)  # 30 min
+
     ws_url = f"wss://stream.binance.com:9443/ws/{listen_key}"
     session.close()  # ✅ Close session after fetching config
 
     def on_open(ws):
         logger.info(f"✅ WebSocket connected to {ws_url}")
 
-    def on_close(ws, close_status_code, close_msg):
-        logger.info(f"❌ WebSocket closed: {close_status_code}, {close_msg}")
-
-        # ✅ Check if auto_reconnect is disabled and stop reconnection
-        if not getattr(ws, "auto_reconnect", auto_reconnect):
-            logger.info("Forced closure detected; closing orders.")
-            close_and_sell_all(exchange_instance, symbol)
-            return  # ✅ STOP execution, preventing reconnection
-
-        logger.info("Connection lost but auto-reconnect is enabled; preserving orders.")
-
-        reconnect_delay = 5  # seconds
-        logger.info(f"Attempting to reconnect in {reconnect_delay} seconds...")
-
-        threading.Timer(
-            reconnect_delay,
-            lambda: start_binance_websocket(
-                exchange_instance, symbol, bot_config_id, amount,
-                step_size, tick_size, min_notional,
-                sl_buffer_percent, sell_rebound_percent,
-                auto_reconnect=auto_reconnect,  # ✅ Ensures auto_reconnect is respected
-                db_session=db_session  
-            )
-        ).start()
-
     def on_message(ws, message):
-        session = None  # ✅ Ensure session is defined
         try:
             data = json.loads(message)
-
-            # 🔄 Respond to Binance `ping` messages with a `pong`
-            if "ping" in data:
-                ws.send(json.dumps({"pong": data["ping"]}))  # 🔁 Send back the same payload
-                return  # ⛔ No need to process further
-
-            # 🔍 FILTER: Only process "executionReport" events with "FILLED" status
-            if not (data.get("e") == "executionReport" and data.get("X") == "FILLED"):
-                return  # ⛔ Skip if it's not the event we need
-
-            # ✅ Use "L" as current price
-            symbol_price = float(data["L"])
-            current_price = symbol_price
-
-            session = SessionLocal()  # ✅ Open a new session only when needed
-            bot_config = session.query(models.ExchangeBotConfig).filter(models.ExchangeBotConfig.id == bot_config_id).first()
-            if not bot_config:
-                logger.error(f"⚠️ Bot config with ID {bot_config_id} not found.")
-                return
-
-            session.refresh(bot_config)
-            tp_levels = json.loads(bot_config.tp_levels_json)
-            sl_levels = json.loads(bot_config.sl_levels_json)
-
-            logger.info(f"Current Price: {current_price} | Current TPs: {tp_levels} | Current Stop Loss: {sl_levels}")
-
-
-            tp_levels = json.loads(bot_config.tp_levels_json)
-            sl_levels = json.loads(bot_config.sl_levels_json)
-            
-            for i in range(len(tp_levels)):  
-                    if current_price >= tp_levels[i]:  
-                        logger.info(f"GateIO TP Level: {tp_levels}")
-                        triggered_tp = tp_levels.pop(i)  # ✅ Remove the TP hit
-                        bot_config.tp_levels_json = json.dumps(tp_levels)
-                        logger.info(f"GateIO Level dumped, current TP Levels: {bot_config.tp_levels_json}")
-                        session.commit()
-                        logger.info(f"🎯 Price {current_price} hit TP {triggered_tp}")
-
-                        # ✅ If `i == 0`, we hit the **highest** TP -> reset the grid
-                        if i == 0:  
-                            logger.info("All TPs filled! -> Resetting grid after delay.")
-                            try:
-                                open_orders = exchange_instance.fetch_open_orders(symbol)
-                                for order in open_orders:
-                                    exchange_instance.cancel_order(order['id'], symbol)
-                                    logger.info(f"🛑 Cancelled order {order['id']}")
-                            except Exception as e:
-                                logger.error(f"❌ Error cancelling orders: {e}")
-                            
-                            initialize_orders(
-                                exchange_instance,
-                                symbol,
-                                amount,
-                                bot_config.tp_percent,
-                                bot_config.sl_percent,
-                                step_size,
-                                tick_size,
-                                min_notional,
-                                session,
-                                bot_config
-                            )
-                            return  # ✅ Stop further TP processing (Grid Reset)
-
-                        else:  
-                            # ✅ Place a new SL based on the TP hit
-                            new_sl_price = round_price(triggered_tp * (1 - sl_buffer_percent / 100), tick_size)
-
-                            if sl_levels:
-                                last_sl = min(sl_levels)  # Get the lowest SL
-                                try:
-                                    open_orders = exchange_instance.fetch_open_orders(symbol)
-                                    for order in open_orders:
-                                        if order['price'] == last_sl:
-                                            exchange_instance.cancel_order(order['id'], symbol)
-                                            logger.info(f"🛑 Cancelled lowest SL order {order['id']} at {last_sl}")
-                                            break  
-                                except Exception as e:
-                                    logger.error(f"❌ Error cancelling SL orders: {e}")
-
-                                # ✅ Remove the old SL from the array
-                                sl_levels.remove(last_sl)
-
-                            # ✅ Add new SL at position 0 (since it's the highest SL now)
-                            sl_levels.insert(0, new_sl_price)
-
-                            # ✅ Place new limit buy order at new SL level
-                            threading.Timer(0.5, place_limit_buys, args=(
-                                exchange_instance, symbol, amount, [new_sl_price], tick_size, min_notional
-                            )).start()
-
-                            logger.info(f"📈 New SL placed at {new_sl_price}")
-
-                            # ✅ Update SL levels in bot config
-                            bot_config.sl_levels_json = json.dumps(sl_levels)
-                            session.commit()
-
-                        break  # ✅ Stop after processing the first TP hit
-
-            for sl_price in sl_levels:
-                if current_price <= sl_price:
-                    logger.info(f"⚠️ Price {current_price} hit SL {sl_price} -> Placing new SL & Sell orders after delay.")
-                    last_sl = min(sl_levels)
-                    new_sl_price = round_price(last_sl * (1 - sl_buffer_percent / 100), tick_size)
-                    new_sell_price = round_price(sl_price * (1 + sell_rebound_percent / 100), tick_size)
-                    logger.info(f"🔁 New SL @ {new_sl_price} | New Sell @ {new_sell_price}")
-                    base_asset, _ = symbol.split('/')
-                    balance = exchange_instance.fetch_balance()
-                    base_balance = balance.get(base_asset, {}).get('free')
-                    threading.Timer(0.5, place_limit_buys, args=(
-                        exchange_instance, symbol, amount, [new_sl_price], step_size, min_notional
-                    )).start()
-                    threading.Timer(0.5, place_limit_sell, args=(
-                        exchange_instance, symbol, base_balance, new_sell_price, step_size
-                    )).start()
-                    sl_levels.remove(sl_price)
-                    sl_levels.append(new_sl_price)
-                    sl_levels.sort(reverse=True)
-                    bot_config.sl_levels_json = json.dumps(sl_levels)
-                    
-                    # ★★★ Add your new sell price to TP array so it's tracked in on_message
-                    tp_levels = json.loads(bot_config.tp_levels_json)
-                    tp_levels.append(new_sell_price)
-                    # If your code expects TPs in descending order, do this:
-                    tp_levels.sort(reverse=True)  
-                    # If it expects ascending, remove "reverse=True".
-                    bot_config.tp_levels_json = json.dumps(tp_levels)
-
-                    session.commit()
-                    break
-
         except Exception as e:
-            logger.error(f"❌ Error processing WebSocket message: {e}")
-        finally:
-            if session:
-                session.close()  # ✅ Ensure session is closed
+            logger.error(f"❌ Error parsing message: {e}")
+            return
+
+        # Respond to ping messages.
+        if "ping" in data:
+            ws.send(json.dumps({"pong": data["ping"]}))
+            return
+
+        # Only process executionReport events with FILLED status.
+        if data.get("e") != "executionReport" or data.get("X") != "FILLED":
+            return
+
+        try:
+            current_price = float(data.get("L"))
+        except Exception as e:
+            logger.error(f"❌ Error extracting current price: {e}")
+            return
+
+        process_order_update(
+            exchange_instance, symbol, bot_config_id, amount,
+            step_size, tick_size, min_notional,
+            sl_buffer_percent, sell_rebound_percent,
+            current_price
+        )
+
+    def on_error(ws, error):
+        logger.error(f"🚨 Binance WebSocket error: {error}")
+        # If auto-reconnect is enabled, force closure to trigger on_close
+        if getattr(ws, "auto_reconnect", True):
+            ws.close()
 
     def on_close(ws, close_status_code, close_msg):
         logger.info(f"❌ Binance WebSocket closed: {close_status_code}, {close_msg}")
@@ -500,6 +403,7 @@ def start_binance_websocket(exchange_instance, symbol, bot_config_id, amount,
         # ✅ Close WebSocket connection explicitly
         ws.close()
 
+        # If auto_reconnect is disabled, close orders and stop
         if not getattr(ws, "auto_reconnect", True):
             logger.info("Forced closure detected; closing orders.")
             close_and_sell_all(exchange_instance, symbol)
@@ -521,22 +425,18 @@ def start_binance_websocket(exchange_instance, symbol, bot_config_id, amount,
             )
         ).start()
 
-    def on_error(ws, error):
-        logger.error(f"🚨 Binance WebSocket error: {error}")
-        # If auto-reconnect is enabled, force closure to trigger on_close
-        if getattr(ws, "auto_reconnect", True):
-            ws.close()
     ws = websocket.WebSocketApp(ws_url,
                                 on_open=on_open,
-                                on_close=on_close,
+                                on_message=on_message,
                                 on_error=on_error,
-                                on_message=on_message)
+                                on_close=on_close)
     ws.auto_reconnect = auto_reconnect
+
     wst = threading.Thread(target=ws.run_forever, daemon=True)
     wst.start()
+
     logger.info(f"🚀 Started Binance WebSocket for {symbol}. Listening for price movements...")
     return ws
-
 
 def start_bitmart_websocket(exchange_instance, symbol, bot_config_id, amount,
                               step_size, tick_size, min_notional, 
@@ -596,7 +496,7 @@ def start_bitmart_websocket(exchange_instance, symbol, bot_config_id, amount,
             if "data" in msg and isinstance(msg["data"], list) and msg["data"]:
                 order_data = msg["data"][0]
                 order_state = order_data.get("order_state")
-                if order_state in ["filled", "partially_filled"]:
+                if order_state in ["filled"]:
                     price = float(order_data.get("price", 0))
                     if price == 0:
                         price = float(order_data.get("last_fill_price", 0))
