@@ -375,7 +375,7 @@ def start_binance_websocket(exchange_instance, symbol, bot_config_id, amount,
             return
 
         # Only process executionReport events with FILLED status.
-        if data.get("e") != "executionReport" or data.get("X") != "FILLED":
+        if data.get("e") != "executionReport" or data.get("X") != "FILLED" or data.get("s") != symbol:
             return
 
         try:
