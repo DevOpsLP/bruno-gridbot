@@ -376,10 +376,10 @@ def start_binance_websocket(exchange_instance, symbol, bot_config_id, amount,
 
         # Only process executionReport events with FILLED status.
         if data.get("e") != "executionReport" or data.get("X") != "FILLED" or data.get("s") != symbol.replace("/", ""):
-            logger.info(f"Binance: Order filled: {data}")
             return
 
         try:
+            logger.info(f"Binance: Order filled: {data}")
             current_price = float(data.get("L"))
         except Exception as e:
             logger.error(f"❌ Error extracting current price: {e}")
