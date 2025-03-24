@@ -210,7 +210,7 @@ def initialize_orders(exchange, symbol, amount, tp_percent, sl_percent,
         order_size = amount
     # --- Proceed with your market buy ---
     exchange.create_market_buy_order(symbol, order_size, params=params)
-    logger.info(f"{exchange.id}:r Market buy executed: {order_size} {base_asset} @ {current_price}")
+    logger.info(f"{exchange.id}: Market buy executed: {order_size} {base_asset} @ {current_price}")
 
     # The "intended" prices
     intended_tp = round_price(current_price * (1 + tp_percent / 100), tick_size)
@@ -376,10 +376,10 @@ def start_binance_websocket(exchange_instance, symbol, bot_config_id, amount,
 
         # Only process executionReport events with FILLED status.
         if data.get("e") != "executionReport" or data.get("X") != "FILLED" or data.get("s") != symbol:
+            logger.info(f"Binance: Order filled: {data}")
             return
 
         try:
-            logger.info(f"Binance: Order filled: {data}")
             current_price = float(data.get("L"))
         except Exception as e:
             logger.error(f"❌ Error extracting current price: {e}")
@@ -406,14 +406,14 @@ def start_binance_websocket(exchange_instance, symbol, bot_config_id, amount,
 
         # If auto_reconnect is disabled, close orders and stop
         if not getattr(ws, "auto_reconnect", True):
-            logger.info("Forced closure detected; closing orders.")
+            logger.info("Binance: Forced closure detected; closing orders.")
             close_and_sell_all(exchange_instance, symbol)
             return
         else:
-            logger.info("Connection lost but auto-reconnect is enabled; preserving orders.")
+            logger.info("Binance: Connection lost but auto-reconnect is enabled; preserving orders.")
 
         reconnect_delay = 5  # seconds
-        logger.info(f"Attempting to reconnect in {reconnect_delay} seconds...")
+        logger.info(f"Binance: Attempting to reconnect in {reconnect_delay} seconds...")
         
         threading.Timer(
             reconnect_delay,
