@@ -379,6 +379,7 @@ def start_binance_websocket(exchange_instance, symbol, bot_config_id, amount,
             return
 
         try:
+            logger.info(f"Binance: Order filled: {data}")
             current_price = float(data.get("L"))
         except Exception as e:
             logger.error(f"❌ Error extracting current price: {e}")
@@ -538,7 +539,6 @@ def start_bitmart_websocket(exchange_instance, symbol, bot_config_id, amount,
             reset_ping_timer(ws)
             return
 
-        logger.info(f"Received message: {message}")
         try:
             msg = json.loads(message)
         except Exception as e:
@@ -598,6 +598,8 @@ def start_bitmart_websocket(exchange_instance, symbol, bot_config_id, amount,
         on_error=on_error,
         on_close=on_close
     )
+    
+    ws_app.auto_reconnect = auto_reconnect
 
     # Run the WebSocket in a background thread so that the call is non-blocking.
     ws_thread = threading.Thread(target=lambda: ws_app.run_forever(), daemon=True)
