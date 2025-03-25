@@ -130,5 +130,6 @@ class GridBot:
         for (exchange, sym), ws in self.websocket_connections.items():
             status[sym] = 'running' if ws.sock and ws.sock.connected else 'stopped'
         return status
+
 # Global instance for API control
 grid_bot = GridBot()

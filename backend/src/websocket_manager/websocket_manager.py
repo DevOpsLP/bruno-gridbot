@@ -7,11 +7,12 @@ import time
 import requests
 import hashlib
 import hmac
+import zlib  # added for decompression
+from src.utils.trade_normalizers import process_trade_message
 from database import crud, models, schemas
 from database.database import SessionLocal
 from decimal import Decimal, ROUND_DOWN
 from websocket import WebSocketApp
-import zlib  # added for decompression
 
 logger = logging.getLogger(__name__)
 
@@ -391,7 +392,15 @@ def start_binance_websocket(exchange_instance, symbol, bot_config_id, amount,
             sl_buffer_percent, sell_rebound_percent,
             current_price
         )
-
+        # Now, process the trade record: normalize and store the trade (with PnL calculation, etc.)
+        try:
+            
+            # Use the API key's id from the bot config since it's stored there:
+            exchange_api_key_id = bot_config.exchange_api_key.id
+            process_trade_message("binance", data, db_session, exchange_api_key_id)
+        except Exception as e:
+            logger.error(f"Error processing trade message: {e}")
+            
     def on_error(ws, error):
         logger.error(f"🚨 Binance WebSocket error: {error}")
         # If auto-reconnect is enabled, force closure to trigger on_close
@@ -509,6 +518,7 @@ def start_bitmart_websocket(exchange_instance, symbol, bot_config_id, amount,
                         sl_buffer_percent, sell_rebound_percent, 
                         current_price
                     )
+                    process_trade_message("bitmart", msg, db_session, bot_config.exchange_api_key.id)
         except Exception as e:
             logger.error(f"❌ Error processing BitMart WebSocket message: {e}")
 
@@ -690,6 +700,7 @@ def start_gateio_websocket(exchange_instance, symbol, bot_config_id, amount,
                     step_size, tick_size, min_notional, 
                     sl_buffer_percent, sell_rebound_percent, current_price
                 )
+                process_trade_message("gateio", data, db_session, bot_config.exchange_api_key.id)
         except Exception as e:
             logger.error(f"❌ Error processing Gate.io WebSocket message: {e}")
 
@@ -847,6 +858,7 @@ def start_bybit_websocket(exchange_instance, symbol, bot_config_id, amount,
                 step_size, tick_size, min_notional, 
                 sl_buffer_percent, sell_rebound_percent, current_price
             )
+            process_trade_message("bybit", msg_json, db_session, bot_config.exchange_api_key.id)
 
     def on_error(ws, error):
         logger.error(f"🚨 WebSocket error: {error}")

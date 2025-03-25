@@ -340,24 +340,19 @@ def get_usdc_usdt_symbols():
 
 @app.get("/portfolio", response_model=schemas.PortfolioResponse)
 def get_portfolio(db: Session = Depends(get_db)):
-    # Get all symbols from the database
-    symbols = crud.get_all_symbols(db)
+    # Query only symbols that have at least one trade record.
+    symbols = db.query(models.Symbol).join(models.TradeRecord).distinct().all()
     portfolio_list = []
-    
+
     for symbol in symbols:
-        # Get trade records for this symbol
         trades = crud.get_trade_records_by_symbol(db, symbol.id)
-        
-        # Aggregate invested and received amounts based on trade side
         total_invested = sum(trade.cost for trade in trades if trade.side.lower() == "buy")
         total_received = sum(trade.cost for trade in trades if trade.side.lower() == "sell")
-        
-        # Simple PnL calculation (can be adjusted for fees and more complex logic)
         pnl = total_received - total_invested
 
         portfolio_list.append({
             "symbol": symbol.symbol,
-            "totalInvested": total_invested,
+            "totalCost": total_invested,
             "totalPnl": pnl,
             "trades": trades
         })
