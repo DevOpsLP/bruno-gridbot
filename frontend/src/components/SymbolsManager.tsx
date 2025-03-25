@@ -174,7 +174,7 @@ export default function SymbolsManager() {
         <h2 className="text-lg font-bold">Symbols Manager</h2>
         <button
           onClick={() => setEditMode(!editMode)}
-          className="px-3 py-1 rounded-lg border bg-gray-200"
+          className="px-3 py-1 rounded-lg border bg-gray-200 cursor-pointer"
         >
           {editMode ? "Exit Edit Mode" : "Edit Symbols"}
         </button>
@@ -203,14 +203,14 @@ export default function SymbolsManager() {
         <>
           <button
             onClick={addNewRow}
-            className="w-full px-4 py-2 border-2 border-dashed rounded-lg"
+            className="w-full px-4 py-2 border-2 border-dashed rounded-lg cursor-pointer"
           >
             + Add Symbol
           </button>
 
           <button
             onClick={handleSave}
-            className="w-full px-4 py-2 mt-2 bg-blue-500 text-white rounded-lg"
+            className="w-full px-4 py-2 mt-2 bg-blue-500 text-white rounded-lg cursor-pointer"
           >
             Save Changes
           </button>

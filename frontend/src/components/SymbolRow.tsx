@@ -112,14 +112,14 @@ export default function SymbolRow({
       {/* Start/Stop Button */}
       <button
         onClick={() => (isRunning ? onStop(selectedSymbol) : onStart(selectedSymbol))}
-        className={`px-4 py-2 rounded-2xl text-white ${isRunning ? "bg-red-500" : "bg-green-500"}`}
+        className={`px-4 py-2 rounded-2xl text-white cursor-pointer ${isRunning ? "bg-red-500" : "bg-green-500"}`}
       >
         {isRunning ? "Stop" : "Start"}
       </button>
 
       {/* Remove Row */}
       {editMode && (
-        <button onClick={onRemove} className="px-2 py-1 text-sm bg-gray-300 rounded-xl">
+        <button onClick={onRemove} className="px-2 py-1 text-sm bg-gray-300 rounded-xl cursor-pointer">
           Remove
         </button>
       )}

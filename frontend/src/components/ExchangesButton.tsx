@@ -35,7 +35,7 @@ export default function ExchangesButton() {
           <button
             key={ex}
             onClick={() => handleToggleExchange(ex)}
-            className={`px-4 py-1 rounded-full border border-dashed transition
+            className={`px-4 py-1 rounded-full border border-dashed transition cursor-pointer
               ${active
                 ? "bg-blue-500 text-white border-blue-500 hover:bg-blue-600"
                 : "bg-transparent text-gray-700 border-gray-400 hover:bg-gray-100"}
