@@ -4,10 +4,9 @@ import { supportedExchanges } from "../utils/supported_exchanges";
 
 export default function ExchangesButton() {
   const [selectedExchanges, setSelectedExchanges] = useState<string[]>([]);
-  const [showList, setShowList] = useState(false);
 
   useEffect(() => {
-    // Load from localStorage
+    // Load saved selection from localStorage
     const saved = localStorage.getItem("selectedExchanges");
     if (saved) {
       setSelectedExchanges(JSON.parse(saved));
@@ -16,7 +15,7 @@ export default function ExchangesButton() {
 
   const handleToggleExchange = (exchange: string) => {
     setSelectedExchanges((prev) => {
-      let newList = [];
+      let newList: string[] = [];
       if (prev.includes(exchange)) {
         newList = prev.filter((ex) => ex !== exchange);
       } else {
@@ -28,30 +27,24 @@ export default function ExchangesButton() {
   };
 
   return (
-    <div className="relative inline-block z-50">
-      <button
-        onClick={() => setShowList(!showList)}
-        className="px-4 py-2 border rounded-xl"
-      >
-        Exchanges
-      </button>
-      {showList && (
-        <div className="absolute bg-white border rounded shadow p-2 mt-2">
-          {supportedExchanges.map((ex) => {
-            const active = selectedExchanges.includes(ex);
-            return (
-              <div
-                key={ex}
-                className="flex items-center space-x-2 hover:bg-gray-100 p-1 cursor-pointer"
-                onClick={() => handleToggleExchange(ex)}
-              >
-                <input type="checkbox" readOnly checked={active} />
-                <span>{ex.toUpperCase()}</span>
-              </div>
-            );
-          })}
-        </div>
-      )}
+    <div className="flex items-center space-x-2">
+      <span className="font-bold">Exchange:</span>
+      {supportedExchanges.map((ex) => {
+        const active = selectedExchanges.includes(ex);
+        return (
+          <button
+            key={ex}
+            onClick={() => handleToggleExchange(ex)}
+            className={`px-4 py-1 rounded-full border border-dashed transition
+              ${active
+                ? "bg-blue-500 text-white border-blue-500 hover:bg-blue-600"
+                : "bg-transparent text-gray-700 border-gray-400 hover:bg-gray-100"}
+            `}
+          >
+            {ex.toUpperCase()}
+          </button>
+        );
+      })}
     </div>
   );
 }
