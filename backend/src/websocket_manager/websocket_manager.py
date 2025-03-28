@@ -840,32 +840,35 @@ def start_bybit_websocket(exchange_instance, symbol, bot_config_id, amount,
         if "data" not in msg_json or not isinstance(msg_json["data"], list) or not msg_json["data"]:
             return
 
-        order_data = msg_json["data"][0]
+        try:
+            order_data = msg_json["data"][0]
 
-        if "symbol" not in order_data:
-            logger.error(f"Missing 'symbol' in order_data: {order_data}")
-            return
-        
-        symbol_str = order_data["symbol"]  # Safe now
+            if "symbol" not in order_data:
+                logger.error(f"Missing 'symbol' in order_data: {order_data}")
+                return
 
-        order_status = order_data.get("orderStatus", order_data.get("status", ""))
-        order_symbol = symbol_str.replace("/", "")
-        if order_symbol == symbol.replace("/", "") and order_status in ["Filled"]:
-            price = order_data.get("price")
-            current_price = float(price) if price is not None else 0.0
+            symbol_str = order_data["symbol"]  # Safe now
 
-            if current_price == 0:
-                avg_price = order_data.get("avgPrice")
-                if avg_price is not None:
-                    current_price = float(avg_price)
-            logger.info(f"✅ Order processed: {order_data} at price {current_price} vs Order price: {order_data.get('price')}")
-            process_order_update(
-                exchange_instance, symbol, bot_config_id, amount, 
-                step_size, tick_size, min_notional, 
-                sl_buffer_percent, sell_rebound_percent, current_price
-            )
-            process_trade_message("bybit", msg_json, db_session, bot_config.exchange_api_key.id)
+            order_status = order_data.get("orderStatus", order_data.get("status", ""))
+            order_symbol = symbol_str.replace("/", "")
+            if order_symbol == symbol.replace("/", "") and order_status in ["Filled"]:
+                price = order_data.get("price")
+                current_price = float(price) if price is not None else 0.0
 
+                if current_price == 0:
+                    avg_price = order_data.get("avgPrice")
+                    if avg_price is not None:
+                        current_price = float(avg_price)
+                logger.info(f"✅ Order processed: {order_data} at price {current_price} vs Order price: {order_data.get('price')}")
+                process_order_update(
+                    exchange_instance, symbol, bot_config_id, amount, 
+                    step_size, tick_size, min_notional, 
+                    sl_buffer_percent, sell_rebound_percent, current_price
+                )
+                process_trade_message("bybit", msg_json, db_session, bot_config.exchange_api_key.id)
+        except Exception as e:
+            logger.error(f"❌ Error processing order update: {e}")
+            
     def on_error(ws, error):
         logger.error(f"🚨 WebSocket error: {error}")
         if getattr(ws, "auto_reconnect", False):
