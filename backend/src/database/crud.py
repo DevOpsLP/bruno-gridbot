@@ -147,9 +147,9 @@ def create_trade_record(db: Session, trade: schemas.TradeRecordBase):
     db.refresh(db_trade)
     return db_trade
 
-def get_trade_records_by_symbol(db: Session, symbol_id: int, skip: int = 0, limit: int = 100):
+def get_trade_records_by_symbol(db: Session, symbol: str, skip: int = 0, limit: int = 100):
     return db.query(models.TradeRecord)\
-             .filter(models.TradeRecord.symbol_id == symbol_id)\
+             .filter(models.TradeRecord.symbol == symbol.upper())\
              .offset(skip)\
              .limit(limit)\
              .all()
