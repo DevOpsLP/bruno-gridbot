@@ -44,18 +44,22 @@ class TradeRecord(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     exchange_api_key_id = Column(Integer, ForeignKey("exchange_api_keys.id"), nullable=False)
-    symbol_id = Column(Integer, ForeignKey("symbols.id"), nullable=False)
+
+    # CHANGED: symbol is now a string, not an integer foreign key
+    symbol = Column(String, nullable=False)
+
     order_id = Column(String, index=True, nullable=True)
     trade_id = Column(String, index=True, nullable=True)
-    side = Column(String, nullable=False)  # "buy" or "sell"
+    side = Column(String, nullable=False)      # "buy" or "sell"
     order_type = Column(String, nullable=False)  # e.g. "market", "limit"
     amount = Column(Float, nullable=False)
     price = Column(Float, nullable=False)
     fee = Column(Float, default=0.0)
     fee_currency = Column(String, nullable=True)
-    cost = Column(Float, nullable=False)  # Typically amount * price, plus fees if needed
-    pnl = Column(Float, default=0.0)  # This can be computed later if needed
+    cost = Column(Float, nullable=False)  # Typically amount * price
+    pnl = Column(Float, default=0.0)      # Optional
+
     created_at = Column(DateTime, default=datetime.utcnow)
 
     exchange_api_key = relationship("ExchangeAPIKey")
-    symbol = relationship("Symbol")
+    # REMOVED: symbol = relationship("Symbol") (no longer needed)

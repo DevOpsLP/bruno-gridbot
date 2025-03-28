@@ -48,7 +48,10 @@ class UpdateSymbolsRequest(BaseModel):
 
 class TradeRecordBase(BaseModel):
     exchange_api_key_id: int
-    symbol_id: int
+
+    # CHANGED: rename symbol_id to symbol, and make it a string
+    symbol: str
+
     order_id: Optional[str] = None
     trade_id: Optional[str] = None
     side: str

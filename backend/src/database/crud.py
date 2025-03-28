@@ -130,7 +130,7 @@ def update_stored_levels(db: Session, config_id: int, tp_levels: list, sl_levels
 def create_trade_record(db: Session, trade: schemas.TradeRecordBase):
     db_trade = models.TradeRecord(
         exchange_api_key_id=trade.exchange_api_key_id,
-        symbol_id=trade.symbol_id,
+        symbol=trade.symbol,  # CHANGED
         order_id=trade.order_id,
         trade_id=trade.trade_id,
         side=trade.side,
