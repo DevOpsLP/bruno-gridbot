@@ -43,11 +43,10 @@ def normalize_gateio(msg: dict, exchange_api_key_id: int) -> TradeRecordBase:
         pnl=0.0
     )
 
-# Normalizer for Bybit messages
 def normalize_bybit(msg: dict, exchange_api_key_id: int) -> TradeRecordBase:
     return TradeRecordBase(
         exchange_api_key_id=exchange_api_key_id,
-        symbol_id=normalize_symbol(msg["symbol"]),
+        symbol=normalize_symbol(msg["symbol"]),  # Change here from symbol_id to symbol
         order_id=msg["orderId"],
         trade_id=None,  # Adjust if available
         side=msg["side"].lower(),
