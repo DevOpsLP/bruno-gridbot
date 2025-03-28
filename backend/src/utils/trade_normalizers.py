@@ -12,7 +12,7 @@ def normalize_symbol(symbol: str) -> str:
 def normalize_binance(msg: dict, exchange_api_key_id: int) -> TradeRecordBase:
     return TradeRecordBase(
         exchange_api_key_id=exchange_api_key_id,
-        symbol_id=normalize_symbol(msg["s"]),
+        symbol=normalize_symbol(msg["s"]),  # Changed from symbol_id to symbol
         order_id=msg["c"],
         trade_id=str(msg["t"]),
         side=msg["S"].lower(),
@@ -30,7 +30,7 @@ def normalize_gateio(msg: dict, exchange_api_key_id: int) -> TradeRecordBase:
     data = msg["result"][0]
     return TradeRecordBase(
         exchange_api_key_id=exchange_api_key_id,
-        symbol_id=normalize_symbol(data["currency_pair"]),
+        symbol=normalize_symbol(data["currency_pair"]),  # Changed from symbol_id to symbol
         order_id=data["order_id"],
         trade_id=str(data["id"]),
         side=data["side"].lower(),
@@ -43,10 +43,11 @@ def normalize_gateio(msg: dict, exchange_api_key_id: int) -> TradeRecordBase:
         pnl=0.0
     )
 
+# Normalizer for Bybit messages
 def normalize_bybit(msg: dict, exchange_api_key_id: int) -> TradeRecordBase:
     return TradeRecordBase(
         exchange_api_key_id=exchange_api_key_id,
-        symbol=normalize_symbol(msg["symbol"]),  # Change here from symbol_id to symbol
+        symbol=normalize_symbol(msg["symbol"]),  # Changed here from symbol_id to symbol
         order_id=msg["orderId"],
         trade_id=None,  # Adjust if available
         side=msg["side"].lower(),
@@ -64,7 +65,7 @@ def normalize_bitmart(msg: dict, exchange_api_key_id: int) -> TradeRecordBase:
     data = msg["data"][0]
     return TradeRecordBase(
         exchange_api_key_id=exchange_api_key_id,
-        symbol_id=normalize_symbol(data["symbol"]),
+        symbol=normalize_symbol(data["symbol"]),  # Changed from symbol_id to symbol
         order_id=data["order_id"],
         trade_id=data["detail_id"],
         side=data["side"].lower(),
