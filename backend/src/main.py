@@ -341,7 +341,10 @@ def get_usdc_usdt_symbols():
 @app.get("/portfolio", response_model=schemas.PortfolioResponse)
 def get_portfolio(db: Session = Depends(get_db)):
     # Query only symbols that have at least one trade record.
-    symbols = db.query(models.Symbol).join(models.TradeRecord).distinct().all()
+    symbols = db.query(models.Symbol).join(
+                models.TradeRecord, 
+                models.Symbol.symbol == models.TradeRecord.symbol
+            ).distinct().all()
     portfolio_list = []
 
     for symbol in symbols:
