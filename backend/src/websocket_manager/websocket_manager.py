@@ -841,10 +841,14 @@ def start_bybit_websocket(exchange_instance, symbol, bot_config_id, amount,
             return
 
         order_data = msg_json["data"][0]
+
+        if not order_data.get("symbol"):
+            logger.error(f"Missing symbol in order_data: {order_data}")
+            return
+
         order_status = order_data.get("orderStatus", order_data.get("status", ""))
         order_symbol = order_data.get("symbol", "").replace("/", "")
-
-        if order_symbol == symbol.replace("/", "") and order_status in ["Filled", "PartiallyFilledCanceled"]:
+        if order_symbol == symbol.replace("/", "") and order_status in ["Filled"]:
             price = order_data.get("price")
             current_price = float(price) if price is not None else 0.0
 
