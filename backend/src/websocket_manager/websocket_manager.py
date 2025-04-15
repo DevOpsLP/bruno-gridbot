@@ -242,7 +242,11 @@ def place_limit_sell(exchange, symbol, amount, price, step_size):
     
     try:
         order = exchange.create_limit_sell_order(symbol, float(amount), float(price), params=params)
-        if order and isinstance(order, dict) and "price" in order:
+        # Special handling for Bybit
+        if exchange.id == "bybit":
+            logger.info(f"{exchange.id}: Limit sell placed: {amount} @ {float(price)}")
+            return float(price)  # Always return the original price for Bybit
+        elif order and isinstance(order, dict) and "price" in order:
             final_price = float(order["price"])
             logger.info(f"{exchange.id}: Limit sell placed: {amount} @ {final_price}")
             return final_price
@@ -267,7 +271,11 @@ def place_limit_buys(exchange, symbol, total_usdt, prices, step_size, min_notion
         if not min_notional or (amount * p) >= Decimal(str(min_notional)):  # Convert min_notional to Decimal
             try:
                 order = exchange.create_limit_buy_order(symbol, float(amount), float(p), params=params)
-                if order and isinstance(order, dict) and "price" in order:
+                # Special handling for Bybit
+                if exchange.id == "bybit":
+                    logger.info(f"{exchange.id}: Limit buy placed: {amount} @ {float(p)}")
+                    final_prices.append(float(p))  # Always return the original price for Bybit
+                elif order and isinstance(order, dict) and "price" in order:
                     final_price = float(order["price"])
                     logger.info(f"{exchange.id}: Limit buy placed: {amount} @ {final_price}")
                     final_prices.append(final_price)
@@ -848,24 +856,50 @@ def start_bybit_websocket(exchange_instance, symbol, bot_config_id, amount,
                 return
 
             symbol_str = order_data["symbol"]  # Safe now
-
+            
+            # Fix Bybit symbol comparison - Bybit sends DOGEUSDC format
+            bybit_symbol = symbol.replace("/", "")
+            
             order_status = order_data.get("orderStatus", order_data.get("status", ""))
-            order_symbol = symbol_str.replace("/", "")
-            if order_symbol == symbol.replace("/", "") and order_status in ["Filled"]:
-                price = order_data.get("price")
-                current_price = float(price) if price is not None else 0.0
+            if symbol_str == bybit_symbol and order_status in ["Filled"]:
+                # Extract price safely
+                price = order_data.get("price", "0")
+                try:
+                    current_price = float(price) if price and price != "0" else 0.0
+                except (ValueError, TypeError):
+                    current_price = 0.0
 
+                # If price is 0 or missing, try avgPrice
                 if current_price == 0:
-                    avg_price = order_data.get("avgPrice")
-                    if avg_price is not None:
-                        current_price = float(avg_price)
+                    avg_price = order_data.get("avgPrice", "0")
+                    try:
+                        current_price = float(avg_price) if avg_price else 0.0
+                    except (ValueError, TypeError):
+                        # Last fallback - use lastPriceOnCreated
+                        last_price = order_data.get("lastPriceOnCreated", "0")
+                        try:
+                            current_price = float(last_price) if last_price else 0.0
+                        except (ValueError, TypeError):
+                            logger.error(f"❌ Could not determine price from order data: {order_data}")
+                            return
+                        
                 logger.info(f"✅ Order processed: {order_data} at price {current_price} vs Order price: {order_data.get('price')}")
-                process_order_update(
-                    exchange_instance, symbol, bot_config_id, amount, 
-                    step_size, tick_size, min_notional, 
-                    sl_buffer_percent, sell_rebound_percent, current_price
-                )
-                process_trade_message("bybit", msg_json, db_session, bot_config.exchange_api_key.id)
+                
+                try:
+                    process_order_update(
+                        exchange_instance, symbol, bot_config_id, amount, 
+                        step_size, tick_size, min_notional, 
+                        sl_buffer_percent, sell_rebound_percent, current_price
+                    )
+                    
+                    # Process trade separately to avoid one failure affecting the other
+                    try:
+                        process_trade_message("bybit", msg_json, db_session, bot_config.exchange_api_key.id)
+                    except Exception as trade_err:
+                        logger.error(f"❌ Error processing trade message: {trade_err}")
+                        
+                except Exception as update_err:
+                    logger.error(f"❌ Error in process_order_update: {update_err}")
         except Exception as e:
             logger.error(f"❌ Error processing order update: {e}")
             
@@ -930,8 +964,16 @@ def process_order_update(exchange_instance, symbol, bot_config_id, amount, step_
             logger.error(f"⚠️ Bot config with ID {bot_config_id} not found.")
             return
 
-        tp_levels = json.loads(bot_config.tp_levels_json)
-        sl_levels = json.loads(bot_config.sl_levels_json)
+        # Safely parse JSON with error handling
+        try:
+            tp_levels = json.loads(bot_config.tp_levels_json)
+            sl_levels = json.loads(bot_config.sl_levels_json)
+        except json.JSONDecodeError:
+            logger.error(f"❌ Error parsing TP/SL levels JSON for bot {bot_config_id}")
+            return
+            
+        # Add logging to help debug
+        logger.info(f"{exchange_instance.id}: Checking stored TP: {tp_levels}, stored SL: {sl_levels}")
 
         for i in range(len(tp_levels)):
             if current_price >= tp_levels[i]:
@@ -996,7 +1038,7 @@ def process_order_update(exchange_instance, symbol, bot_config_id, amount, step_
                 threading.Timer(
                     0.5,
                     place_limit_buys,
-                    args=(exchange_instance, symbol, amount, [new_sl_price], tick_size, min_notional)
+                    args=(exchange_instance, symbol, amount, [new_sl_price], step_size, min_notional)
                 ).start()
                 logger.info(f"{bot_config_id}: Checking stored TP: {tp_levels}, stored SL: {sl_levels}")
 
