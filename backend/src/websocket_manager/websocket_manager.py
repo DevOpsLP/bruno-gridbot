@@ -831,11 +831,19 @@ def start_bybit_websocket(exchange_instance, symbol, bot_config_id, amount,
             while getattr(ws, "keep_pinging", True):
                 time.sleep(20)
                 try:
-                    ws.send(json.dumps({"op": "ping"}))
+                    if ws.sock and ws.sock.connected:
+                        ws.send(json.dumps({"op": "ping"}))
                 except Exception as e:
                     logger.error(f"Error sending ping: {e}")
                     break
 
+        # Stop any existing ping thread
+        if hasattr(ws, "ping_thread") and ws.ping_thread.is_alive():
+            ws.keep_pinging = False
+            ws.ping_thread.join(timeout=1.0)
+
+        # Start new ping thread
+        ws.keep_pinging = True
         ws.ping_thread = threading.Thread(target=send_ping, daemon=True)
         ws.ping_thread.start()
 
@@ -929,12 +937,13 @@ def start_bybit_websocket(exchange_instance, symbol, bot_config_id, amount,
         if hasattr(ws, "ping_thread") and ws.ping_thread.is_alive():
             ws.ping_thread.join(timeout=1.0)
 
-        # Check the current value of auto_reconnect.
-        if not getattr(ws, "auto_reconnect", True):  # Changed default to True to match other exchanges
-            logger.info("Forced closure detected; closing orders.")
+        # Check if auto_reconnect is explicitly set to False
+        if getattr(ws, "auto_reconnect", True) is False:  # Default is True, only stop if explicitly False
+            logger.info("Auto-reconnect is disabled; closing orders and stopping.")
             close_and_sell_all(exchange_instance, symbol)
             return  # Stop execution to prevent reconnection.
 
+        # Attempt reconnection since auto_reconnect is True
         logger.info("Connection lost but auto-reconnect is enabled; preserving orders.")
         reconnect_delay = 5  # seconds
         logger.info(f"Attempting to reconnect in {reconnect_delay} seconds...")
@@ -942,6 +951,11 @@ def start_bybit_websocket(exchange_instance, symbol, bot_config_id, amount,
         # Create a new WebSocket instance for reconnection
         def reconnect():
             try:
+                # Stop any existing WebSocket
+                if hasattr(ws, "sock") and ws.sock:
+                    ws.sock.close()
+                
+                # Create new WebSocket with same attributes
                 new_ws = websocket.WebSocketApp(
                     ws_url,
                     on_open=on_open,
@@ -949,7 +963,7 @@ def start_bybit_websocket(exchange_instance, symbol, bot_config_id, amount,
                     on_error=on_error,
                     on_close=on_close
                 )
-                new_ws.auto_reconnect = True
+                new_ws.auto_reconnect = True  # Keep auto_reconnect True for new connection
                 new_ws.keep_pinging = True
                 
                 # Start the WebSocket in a background thread
