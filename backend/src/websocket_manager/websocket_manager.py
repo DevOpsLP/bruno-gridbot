@@ -837,8 +837,14 @@ def start_bybit_websocket(exchange_instance, symbol, bot_config_id, amount,
                     logger.error(f"Error sending ping: {e}")
                     break
 
+        # Initialize ping thread attributes
+        if not hasattr(ws, "ping_thread"):
+            ws.ping_thread = None
+        if not hasattr(ws, "keep_pinging"):
+            ws.keep_pinging = True
+
         # Stop any existing ping thread
-        if hasattr(ws, "ping_thread") and ws.ping_thread.is_alive():
+        if ws.ping_thread and ws.ping_thread.is_alive():
             ws.keep_pinging = False
             ws.ping_thread.join(timeout=1.0)
 
@@ -931,10 +937,15 @@ def start_bybit_websocket(exchange_instance, symbol, bot_config_id, amount,
     def on_close(ws, close_status_code, close_msg):
         logger.info(f"❌ WebSocket closed for {symbol} (code: {close_status_code}, msg: {close_msg})")
         
-        # Stop the ping thread
-        if hasattr(ws, "keep_pinging"):
+        # Initialize attributes if they don't exist
+        if not hasattr(ws, "keep_pinging"):
             ws.keep_pinging = False
-        if hasattr(ws, "ping_thread") and ws.ping_thread.is_alive():
+        if not hasattr(ws, "ping_thread"):
+            ws.ping_thread = None
+
+        # Stop the ping thread safely
+        ws.keep_pinging = False
+        if ws.ping_thread and ws.ping_thread.is_alive():
             ws.ping_thread.join(timeout=1.0)
 
         # Check if auto_reconnect is explicitly set to False
@@ -965,6 +976,7 @@ def start_bybit_websocket(exchange_instance, symbol, bot_config_id, amount,
                 )
                 new_ws.auto_reconnect = True  # Keep auto_reconnect True for new connection
                 new_ws.keep_pinging = True
+                new_ws.ping_thread = None  # Initialize ping_thread as None
                 
                 # Start the WebSocket in a background thread
                 ws_thread = threading.Thread(target=lambda: new_ws.run_forever(), daemon=True)
