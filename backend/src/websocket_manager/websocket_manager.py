@@ -12,7 +12,6 @@ from src.utils.trade_normalizers import process_trade_message
 from database import crud, models, schemas
 from database.database import SessionLocal
 from decimal import Decimal, ROUND_DOWN
-from websocket import WebSocketApp
 
 logger = logging.getLogger(__name__)
 
@@ -236,6 +235,11 @@ def place_limit_sell(exchange, symbol, amount, price, step_size):
     amount = Decimal(str(amount)).quantize(Decimal(str(step_size)), rounding=ROUND_DOWN)  # Fix precision
     price = Decimal(str(price))  # Convert price to Decimal
     
+    # Check for minimum valid amount (prevent zero or very small amounts)
+    if amount <= Decimal('0') or amount < Decimal(str(step_size)):
+        logger.error(f"{exchange.id}: Cannot place sell order - amount {amount} is too small (minimum: {step_size})")
+        return float(price)  # Return original price without placing order
+    
     params = {}
     if exchange.id == "bybit":
         params["timeInForce"] = "GTC"  # Ensure order stays active until filled
@@ -263,6 +267,12 @@ def place_limit_buys(exchange, symbol, total_usdt, prices, step_size, min_notion
         p = Decimal(str(p))  # Ensure price is also a Decimal
         amount = Decimal(total_usdt) / p  # Convert total_usdt to Decimal before division
         amount = amount.quantize(Decimal(str(step_size)), rounding=ROUND_DOWN)  # Fix precision
+        
+        # Check for minimum valid amount
+        if amount <= Decimal('0') or amount < Decimal(str(step_size)):
+            logger.error(f"{exchange.id}: Cannot place buy order @ {p} - calculated amount {amount} is too small (minimum: {step_size})")
+            final_prices.append(float(p))  # Add the original price without placing an order
+            continue
         
         params = {}
         if exchange.id == "bybit":
@@ -818,7 +828,7 @@ def start_bybit_websocket(exchange_instance, symbol, bot_config_id, amount,
 
         # Start a ping loop: send ping every 20 seconds.
         def send_ping():
-            while True:
+            while getattr(ws, "keep_pinging", True):
                 time.sleep(20)
                 try:
                     ws.send(json.dumps({"op": "ping"}))
@@ -826,8 +836,8 @@ def start_bybit_websocket(exchange_instance, symbol, bot_config_id, amount,
                     logger.error(f"Error sending ping: {e}")
                     break
 
-        ping_thread = threading.Thread(target=send_ping, daemon=True)
-        ping_thread.start()
+        ws.ping_thread = threading.Thread(target=send_ping, daemon=True)
+        ws.ping_thread.start()
 
     def on_message(ws, message):
         try:
@@ -912,13 +922,15 @@ def start_bybit_websocket(exchange_instance, symbol, bot_config_id, amount,
 
     def on_close(ws, close_status_code, close_msg):
         logger.info(f"❌ WebSocket closed for {symbol} (code: {close_status_code}, msg: {close_msg})")
-        try:
-            ws.close()
-        except Exception as e:
-            logger.error(f"Error during ws.close(): {e}")
+        
+        # Stop the ping thread
+        if hasattr(ws, "keep_pinging"):
+            ws.keep_pinging = False
+        if hasattr(ws, "ping_thread") and ws.ping_thread.is_alive():
+            ws.ping_thread.join(timeout=1.0)
 
         # Check the current value of auto_reconnect.
-        if not getattr(ws, "auto_reconnect", False):
+        if not getattr(ws, "auto_reconnect", True):  # Changed default to True to match other exchanges
             logger.info("Forced closure detected; closing orders.")
             close_and_sell_all(exchange_instance, symbol)
             return  # Stop execution to prevent reconnection.
@@ -927,17 +939,29 @@ def start_bybit_websocket(exchange_instance, symbol, bot_config_id, amount,
         reconnect_delay = 5  # seconds
         logger.info(f"Attempting to reconnect in {reconnect_delay} seconds...")
 
-        # When reconnecting, we pass auto_reconnect=True for a fresh connection.
-        threading.Timer(
-            reconnect_delay,
-            lambda: start_bybit_websocket(
-                exchange_instance, symbol, bot_config_id, amount,
-                step_size, tick_size, min_notional,
-                sl_buffer_percent, sell_rebound_percent,
-                auto_reconnect=True,
-                db_session=db_session
-            )
-        ).start()
+        # Create a new WebSocket instance for reconnection
+        def reconnect():
+            try:
+                new_ws = websocket.WebSocketApp(
+                    ws_url,
+                    on_open=on_open,
+                    on_message=on_message,
+                    on_error=on_error,
+                    on_close=on_close
+                )
+                new_ws.auto_reconnect = True
+                new_ws.keep_pinging = True
+                
+                # Start the WebSocket in a background thread
+                ws_thread = threading.Thread(target=lambda: new_ws.run_forever(), daemon=True)
+                ws_thread.start()
+                return new_ws
+            except Exception as e:
+                logger.error(f"❌ Error during reconnection: {e}")
+                return None
+
+        # Schedule reconnection
+        threading.Timer(reconnect_delay, reconnect).start()
 
     logger.info("🚀 Connecting to Bybit WebSocket via WebSocketApp...")
     ws_app = websocket.WebSocketApp(
@@ -947,6 +971,10 @@ def start_bybit_websocket(exchange_instance, symbol, bot_config_id, amount,
         on_error=on_error,
         on_close=on_close
     )
+
+    # Set initial attributes
+    ws_app.auto_reconnect = auto_reconnect
+    ws_app.keep_pinging = True
 
     # Start the WebSocket in a background thread.
     ws_thread = threading.Thread(target=lambda: ws_app.run_forever(), daemon=True)
@@ -1056,15 +1084,22 @@ def process_order_update(exchange_instance, symbol, bot_config_id, amount, step_
                 balance = exchange_instance.fetch_balance()
                 base_balance = balance.get(base_asset, {}).get('free', 0)
                 
+                # Make sure we have enough balance before placing orders
+                if base_balance <= 0:
+                    logger.warning(f"Insufficient {base_asset} balance ({base_balance}) to place sell order")
+                else:
+                    # Place the sell order only if we have balance
+                    threading.Timer(
+                        0.5,
+                        place_limit_sell,
+                        args=(exchange_instance, symbol, base_balance, new_sell_price, step_size)
+                    ).start()
+                
+                # Always place the buy order regardless of balance
                 threading.Timer(
                     0.5,
                     place_limit_buys,
                     args=(exchange_instance, symbol, amount, [new_sl_price], step_size, min_notional)
-                ).start()
-                threading.Timer(
-                    0.5,
-                    place_limit_sell,
-                    args=(exchange_instance, symbol, base_balance, new_sell_price, step_size)
                 ).start()
                 
                 sl_levels.remove(sl_price)
