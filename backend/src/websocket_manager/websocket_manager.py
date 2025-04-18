@@ -170,8 +170,18 @@ def run_bot_with_websocket(exchange_instance, symbol, amount, db_session, bot_in
             )
         elif exchange_id == "bybit":
             ws = start_bybit_websocket(
-                exchange_instance, symbol, bot_config.id, amount,
-                step_size, tick_size, min_notional, sl_percent, tp_percent
+                exchange_instance,
+                symbol,
+                bot_config.id,
+                amount,
+                step_size,
+                tick_size,
+                min_notional,
+                bot_instance.websocket_connections,      # ← registry dict
+                sl_buffer_percent=sl_percent,    # now floats go into the right params
+                sell_rebound_percent=tp_percent,
+                auto_reconnect=True,
+                db_session=db_session
             )
         else:
             logger.warning(f"No websocket method implemented for exchange: {exchange_id}")
