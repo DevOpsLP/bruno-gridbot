@@ -777,234 +777,149 @@ def start_gateio_websocket(exchange_instance, symbol, bot_config_id, amount,
 
     return ws  # ✅ Return the WebSocket instance
 
-def start_bybit_websocket(exchange_instance, symbol, bot_config_id, amount,
-                          step_size, tick_size, min_notional, 
-                          sl_buffer_percent=2.0, sell_rebound_percent=1.5,
-                          auto_reconnect=True, db_session=None):
+def start_bybit_websocket(
+    exchange_instance,
+    symbol: str,
+    bot_config_id: int,
+    amount: float,
+    step_size: float,
+    tick_size: float,
+    min_notional: float,
+    registry: dict,                   # <── self.websocket_connections
+    sl_buffer_percent: float = 2.0,
+    sell_rebound_percent: float = 1.5,
+    auto_reconnect: bool = True,
+    db_session=None
+):
     """
-    Starts a Bybit WebSocket connection for SPOT orders using the websocket-client library.
+    Opens a single, self healing Bybit Spot order stream and stores it in *registry*.
+    Re uses the same key «(exchange_id, symbol)».
     """
-    # Retrieve bot config and API credentials.
+    # ── 1. fetch API creds ──────────────────────────────────────────────────────
     session = db_session or SessionLocal()
-    bot_config = session.query(models.ExchangeBotConfig).filter(
-        models.ExchangeBotConfig.id == bot_config_id
-    ).first()
-
-    if not bot_config or not bot_config.exchange_api_key:
-        logger.error(f"❌ No API key found for exchange {exchange_instance.id}. Please create an API key first.")
+    bot_cfg = (
+        session.query(models.ExchangeBotConfig)
+        .filter(models.ExchangeBotConfig.id == bot_config_id)
+        .first()
+    )
+    if not (bot_cfg and bot_cfg.exchange_api_key):
+        logger.error("❌ No API key found for this bot_config_id")
         session.close()
         return None
 
-    api_key = bot_config.exchange_api_key.api_key
-    api_secret = bot_config.exchange_api_key.api_secret
+    api_key     = bot_cfg.exchange_api_key.api_key
+    api_secret  = bot_cfg.exchange_api_key.api_secret
     session.close()
 
-    ws_url = "wss://stream.bybit.com/v5/private"  # Change to testnet URL if needed
+    ws_url  = "wss://stream.bybit.com/v5/private"
+    key     = (exchange_instance.id, symbol)          # registry key
+    by_sym  = symbol.replace("/", "")                 # e.g. DOGE/USDC → DOGEUSDC
 
-    def generate_signature(secret, expires):
+    # ── 2. inner helpers ────────────────────────────────────────────────────────
+    def _sig(secret, expires):  # sign the auth payload
         payload = f"GET/realtime{expires}"
-        return hmac.new(secret.encode("utf-8"),
-                        payload.encode("utf-8"),
-                        digestmod=hashlib.sha256).hexdigest()
+        return hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
 
+    # ── 3. websocket callbacks ──────────────────────────────────────────────────
     def on_open(ws):
-        logger.info("🚀 Bybit WebSocket connection opened, sending auth and subscription...")
-        # Authenticate
-        expires = int((time.time() + 10) * 1000)  # Expires 10 seconds from now
-        signature = generate_signature(api_secret, expires)
-        auth_payload = {
+        logger.info("🚀 WS open – authenticating & subscribing")
+        expires = int((time.time() + 10) * 1000)
+        ws.send(json.dumps({
             "req_id": "10001",
             "op": "auth",
-            "args": [api_key, expires, signature]
-        }
-        ws.send(json.dumps(auth_payload))
+            "args": [api_key, expires, _sig(api_secret, expires)]
+        }))
+        ws.send(json.dumps({"op": "subscribe", "args": ["order"]}))
 
-        # Subscribe to order stream
-        subscribe_payload = {
-            "op": "subscribe",
-            "args": ["order"]
-        }
-        ws.send(json.dumps(subscribe_payload))
-
-        # Start a ping loop: send ping every 20 seconds.
-        def send_ping():
-            while getattr(ws, "keep_pinging", True):
-                time.sleep(20)
-                try:
-                    if ws.sock and ws.sock.connected:
-                        ws.send(json.dumps({"op": "ping"}))
-                except Exception as e:
-                    logger.error(f"Error sending ping: {e}")
-                    break
-
-        # Initialize ping thread attributes
-        if not hasattr(ws, "ping_thread"):
-            ws.ping_thread = None
-        if not hasattr(ws, "keep_pinging"):
-            ws.keep_pinging = True
-
-        # Stop any existing ping thread
-        if ws.ping_thread and ws.ping_thread.is_alive():
-            ws.keep_pinging = False
-            ws.ping_thread.join(timeout=1.0)
-
-        # Start new ping thread
-        ws.keep_pinging = True
-        ws.ping_thread = threading.Thread(target=send_ping, daemon=True)
-        ws.ping_thread.start()
-
-    def on_message(ws, message):
+    def on_message(ws, raw):
         try:
-            msg_json = json.loads(message)
-        except Exception as e:
-            logger.error(f"❌ Error parsing message: {e}")
+            msg = json.loads(raw)
+        except json.JSONDecodeError:
+            logger.error("⚠️  bad JSON")
             return
 
-        # Handle auth/subscription responses.
-        if "op" in msg_json and msg_json["op"] in ["auth", "subscribe"]:
-            if not msg_json.get("success", False):
-                logger.error(f"❌ {msg_json['op']} failed: {msg_json.get('ret_msg', '')}")
-            else:
-                logger.info(f"✅ {msg_json['op']} successful.")
+        # auth/sub ack
+        if msg.get("op") in {"auth", "subscribe"}:
+            logger.info("✅ %s %s", msg["op"], "ok" if msg.get("success") else "fail")
             return
 
-        # Process order updates.
-        if "data" not in msg_json or not isinstance(msg_json["data"], list) or not msg_json["data"]:
+        data = (msg.get("data") or [])
+        if not data:
             return
+
+        order = data[0]
+        if order.get("symbol") != by_sym or order.get("orderStatus") != "Filled":
+            return
+
+        # price fallback chain
+        price = next(
+            (
+                float(v) for v in (
+                    order.get("price"), order.get("avgPrice"), order.get("lastPriceOnCreated"), "0"
+                ) if v and v != "0"
+            ),
+            0.0
+        )
+
+        logger.info("✅ order filled %s @ %.10g", by_sym, price)
 
         try:
-            order_data = msg_json["data"][0]
-
-            if "symbol" not in order_data:
-                logger.error(f"Missing 'symbol' in order_data: {order_data}")
-                return
-
-            symbol_str = order_data["symbol"]  # Safe now
-            
-            # Fix Bybit symbol comparison - Bybit sends DOGEUSDC format
-            bybit_symbol = symbol.replace("/", "")
-            
-            order_status = order_data.get("orderStatus", order_data.get("status", ""))
-            if symbol_str == bybit_symbol and order_status in ["Filled"]:
-                # Extract price safely
-                price = order_data.get("price", "0")
-                try:
-                    current_price = float(price) if price and price != "0" else 0.0
-                except (ValueError, TypeError):
-                    current_price = 0.0
-
-                # If price is 0 or missing, try avgPrice
-                if current_price == 0:
-                    avg_price = order_data.get("avgPrice", "0")
-                    try:
-                        current_price = float(avg_price) if avg_price else 0.0
-                    except (ValueError, TypeError):
-                        # Last fallback - use lastPriceOnCreated
-                        last_price = order_data.get("lastPriceOnCreated", "0")
-                        try:
-                            current_price = float(last_price) if last_price else 0.0
-                        except (ValueError, TypeError):
-                            logger.error(f"❌ Could not determine price from order data: {order_data}")
-                            return
-                        
-                logger.info(f"✅ Order processed: {order_data} at price {current_price} vs Order price: {order_data.get('price')}")
-                
-                try:
-                    process_order_update(
-                        exchange_instance, symbol, bot_config_id, amount, 
-                        step_size, tick_size, min_notional, 
-                        sl_buffer_percent, sell_rebound_percent, current_price
-                    )
-                    
-                    # Process trade separately to avoid one failure affecting the other
-                    try:
-                        process_trade_message("bybit", msg_json, db_session, bot_config.exchange_api_key.id)
-                    except Exception as trade_err:
-                        logger.error(f"❌ Error processing trade message: {trade_err}")
-                        
-                except Exception as update_err:
-                    logger.error(f"❌ Error in process_order_update: {update_err}")
+            process_order_update(
+                exchange_instance, symbol, bot_config_id, amount,
+                step_size, tick_size, min_notional,
+                sl_buffer_percent, sell_rebound_percent, price
+            )
         except Exception as e:
-            logger.error(f"❌ Error processing order update: {e}")
-            
-    def on_error(ws, error):
-        logger.error(f"🚨 WebSocket error: {error}")
-        if getattr(ws, "auto_reconnect", False):
-            on_close(ws, None, str(error))
-        else:
-            ws.close()
+            logger.exception("❌ process_order_update failed: %s", e)
 
-    def on_close(ws, close_status_code, close_msg):
-        logger.info(f"❌ WebSocket closed for {symbol} (code: {close_status_code}, msg: {close_msg})")
-        
-        # Initialize attributes if they don't exist
-        if not hasattr(ws, "keep_pinging"):
-            ws.keep_pinging = False
-        if not hasattr(ws, "ping_thread"):
-            ws.ping_thread = None
-
-        # Stop the ping thread safely
-        ws.keep_pinging = False
-        if ws.ping_thread and ws.ping_thread.is_alive():
-            ws.ping_thread.join(timeout=1.0)
-
-        # Check if auto_reconnect is explicitly set to False
-        if getattr(ws, "auto_reconnect", True) is False:  # Default is True, only stop if explicitly False
-            logger.info("Auto-reconnect is disabled; closing orders and stopping.")
-            close_and_sell_all(exchange_instance, symbol)
-            return  # Stop execution to prevent reconnection.
-
-        # Attempt reconnection since auto_reconnect is True
-        logger.info("Connection lost but auto-reconnect is enabled; preserving orders.")
-        reconnect_delay = 5  # seconds
-        logger.info(f"Attempting to reconnect in {reconnect_delay} seconds...")
-
-        # Create a new WebSocket instance for reconnection
-        def reconnect():
+        # trade stream is separate; guard the call
+        if msg.get("topic") == "trade":
             try:
-                # Stop any existing WebSocket
-                if hasattr(ws, "sock") and ws.sock:
-                    ws.sock.close()
-                
-                # Create new WebSocket with same attributes
-                new_ws = websocket.WebSocketApp(
-                    ws_url,
-                    on_open=on_open,
-                    on_message=on_message,
-                    on_error=on_error,
-                    on_close=on_close
-                )
-                new_ws.auto_reconnect = True  # Keep auto_reconnect True for new connection
-                new_ws.keep_pinging = True
-                new_ws.ping_thread = None  # Initialize ping_thread as None
-                
-                # Start the WebSocket in a background thread
-                ws_thread = threading.Thread(target=lambda: new_ws.run_forever(), daemon=True)
-                ws_thread.start()
-                return new_ws
+                process_trade_message("bybit", msg, db_session, bot_cfg.exchange_api_key.id)
             except Exception as e:
-                logger.error(f"❌ Error during reconnection: {e}")
-                return None
+                logger.exception("❌ trade handler failed: %s", e)
 
-        # Schedule reconnection
-        threading.Timer(reconnect_delay, reconnect).start()
+    def on_error(ws, err):
+        logger.error("🚨 WS error: %s", err)
 
-    logger.info("🚀 Connecting to Bybit WebSocket via WebSocketApp...")
-    ws_app = websocket.WebSocketApp(
-        ws_url,
-        on_open=on_open,
-        on_message=on_message,
-        on_error=on_error,
-        on_close=on_close
-    )
+    def on_close(ws, code, msg):
+        logger.warning("❌ WS closed (%s – %s)", code, msg)
+        registry.pop(key, None)  # delete stale reference
 
-    # Set initial attributes
-    ws_app.auto_reconnect = auto_reconnect
-    ws_app.keep_pinging = True
+        if not auto_reconnect:
+            close_and_sell_all(exchange_instance, symbol)
+            return
 
-    # Start the WebSocket in a background thread.
-    ws_thread = threading.Thread(target=lambda: ws_app.run_forever(), daemon=True)
-    ws_thread.start()
+        # ── reconnect in‑place ────────────────────────────────────────────────
+        def _reconnect():
+            logger.info("⭮ reconnecting %s in 5s", key)
+            new_ws = build_ws()
+            registry[key] = new_ws
+            threading.Thread(
+                target=lambda: new_ws.run_forever(ping_interval=20, ping_timeout=10),
+                daemon=True
+            ).start()
+
+        threading.Timer(5, _reconnect).start()
+
+    # ── 4. builder so we can reuse in reconnect ─────────────────────────────────
+    def build_ws():
+        return websocket.WebSocketApp(
+            ws_url,
+            on_open    = on_open,
+            on_message = on_message,
+            on_error   = on_error,
+            on_close   = on_close
+        )
+
+    # ── 5. launch ───────────────────────────────────────────────────────────────
+    ws_app = build_ws()
+    registry[key] = ws_app
+
+    threading.Thread(
+        target=lambda: ws_app.run_forever(ping_interval=20, ping_timeout=10),
+        daemon=True
+    ).start()
 
     return ws_app
 
