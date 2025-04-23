@@ -501,6 +501,9 @@ def start_bitmart_websocket(exchange_instance, symbol, bot_config_id, amount,
     PING_INTERVAL = 15  # seconds to wait before sending a ping if no message is received.
     PONG_TIMEOUT = 15   # seconds to wait for a pong response.
 
+    # Add a set to track processed order IDs
+    processed_orders = set()
+
     def generate_sign(timestamp: str, memo: str, secret: str) -> str:
         message = f"{timestamp}#{memo}#bitmart.WebSocket"
         return hmac.new(secret.encode("utf-8"),
@@ -534,12 +537,27 @@ def start_bitmart_websocket(exchange_instance, symbol, bot_config_id, amount,
             if "data" in msg and isinstance(msg["data"], list) and msg["data"]:
                 order_data = msg["data"][0]
                 order_state = order_data.get("order_state")
+                order_id = order_data.get("order_id")
+                
+                # Skip if we've already processed this order
+                if order_id in processed_orders:
+                    logger.debug(f"Skipping already processed order: {order_id}")
+                    return
+                    
                 if order_state in ["filled"]:
                     price = float(order_data.get("price", 0))
                     if price == 0:
                         price = float(order_data.get("last_fill_price", 0))
                     current_price = price
                     logger.info(f"BitMart WebSocket: {order_data.get('side')} has been triggered at {order_data.get('price')} vs current price {current_price} | Placing new orders")
+                    
+                    # Add order ID to processed set
+                    processed_orders.add(order_id)
+                    
+                    # Clean up old processed orders to prevent memory growth
+                    if len(processed_orders) > 1000:
+                        processed_orders.clear()
+                    
                     process_order_update(
                         exchange_instance, symbol, bot_config_id, amount,
                         step_size, tick_size, min_notional, 
