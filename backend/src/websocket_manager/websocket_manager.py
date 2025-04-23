@@ -498,11 +498,13 @@ def start_bitmart_websocket(exchange_instance, symbol, bot_config_id, amount,
     session.close()
 
     # Ping/Pong configuration
-    PING_INTERVAL = 15  # seconds to wait before sending a ping if no message is received.
-    PONG_TIMEOUT = 15   # seconds to wait for a pong response.
+    PING_INTERVAL = 10  # Reduced from 15 to 10 seconds
+    PONG_TIMEOUT = 20   # Increased from 15 to 20 seconds
+    MAX_RETRIES = 3     # Maximum number of consecutive pong timeouts before closing
 
     # Add a set to track processed order IDs
     processed_orders = set()
+    pong_timeout_count = 0  # Track consecutive pong timeouts
 
     def generate_sign(timestamp: str, memo: str, secret: str) -> str:
         message = f"{timestamp}#{memo}#bitmart.WebSocket"
@@ -519,6 +521,10 @@ def start_bitmart_websocket(exchange_instance, symbol, bot_config_id, amount,
 
     def ping_handler(ws):
         try:
+            if not ws.sock or not ws.sock.connected:
+                logger.warning("WebSocket not connected, skipping ping")
+                return
+                
             ws.send("ping")
             ws.waiting_for_pong = True
             ws.pong_timer = threading.Timer(PONG_TIMEOUT, lambda: pong_timeout_handler(ws))
@@ -528,9 +534,25 @@ def start_bitmart_websocket(exchange_instance, symbol, bot_config_id, amount,
             logger.error(f"Error sending ping: {e}")
 
     def pong_timeout_handler(ws):
+        nonlocal pong_timeout_count
         if getattr(ws, "waiting_for_pong", False):
-            logger.warning("Pong not received in time. Closing connection...")
-            ws.close()
+            pong_timeout_count += 1
+            logger.warning(f"Pong not received in time. Timeout count: {pong_timeout_count}/{MAX_RETRIES}")
+            
+            if pong_timeout_count >= MAX_RETRIES:
+                logger.error("Max pong timeouts reached, closing connection...")
+                ws.close()
+            else:
+                # Try to send another ping
+                try:
+                    if ws.sock and ws.sock.connected:
+                        ws.send("ping")
+                        ws.pong_timer = threading.Timer(PONG_TIMEOUT, lambda: pong_timeout_handler(ws))
+                        ws.pong_timer.daemon = True
+                        ws.pong_timer.start()
+                except Exception as e:
+                    logger.error(f"Error sending recovery ping: {e}")
+                    ws.close()
 
     def message_handler(msg):
         try:
@@ -569,6 +591,8 @@ def start_bitmart_websocket(exchange_instance, symbol, bot_config_id, amount,
             logger.error(f"❌ Error processing BitMart WebSocket message: {e}")
 
     def on_open(ws):
+        nonlocal pong_timeout_count
+        pong_timeout_count = 0  # Reset timeout count on new connection
         logger.info("WebSocket opened, sending login message...")
         timestamp = str(int(time.time() * 1000))
         sign = generate_sign(timestamp, api_memo, api_secret)
@@ -578,6 +602,10 @@ def start_bitmart_websocket(exchange_instance, symbol, bot_config_id, amount,
         reset_ping_timer(ws)
 
     def on_message(ws, message):
+        # Reset pong timeout count on any message
+        nonlocal pong_timeout_count
+        pong_timeout_count = 0
+        
         # Decompress if message is binary (compressed)
         if isinstance(message, bytes):
             try:
