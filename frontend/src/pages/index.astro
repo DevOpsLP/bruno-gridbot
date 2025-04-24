@@ -16,11 +16,11 @@ import Layout from '../layouts/Layout.astro';
 			
 			<div class="grid grid-cols-1 gap-4 sm:gap-8">
 				<div class="w-full overflow-x-auto">
-					<DashboardControls client:visible />
+					<DashboardControls client:load />
 				</div>
-				<!-- <div class="w-full overflow-x-auto">
-					<PortfolioOverview client:visible />
-				</div> -->
+				<div class="w-full overflow-x-auto">
+					<PortfolioOverview client:load />
+				</div>
 			</div>
 		</div>
 	</div>

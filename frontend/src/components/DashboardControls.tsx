@@ -1,10 +1,10 @@
-// Dashboard.tsx
+// DashboardControls.tsx
 import React, { useState, useEffect } from "react";
 import ExchangesButton from "./ExchangesButton";
 import SymbolsManager from "./SymbolsManager";
 import { FaRobot, FaExchangeAlt, FaChartLine } from "react-icons/fa";
 
-export default function Dashboard() {
+export default function DashboardControls() {
   const [globalStatus, setGlobalStatus] = useState("stopped");
   const API_URL = import.meta.env.PUBLIC_API_URL || "http://localhost:8000";
 
