@@ -5,8 +5,23 @@ import Layout from '../layouts/Layout.astro';
 ---
 
 <Layout>
-	<h1 class="text-2xl font-bold mb-4">Welcome to Grid Bot! 🚀</h1>
-	<DashboardControls client:load/>
-    <PortfolioOverview client:load />
-
+	<div class="w-full min-h-screen bg-gray-50">
+		<div class="w-full max-w-[2000px] mx-auto px-3 sm:px-6 lg:px-8 py-3 sm:py-6 lg:py-8">
+			<div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4 sm:mb-8">
+				<div class="flex items-center space-x-2">
+					<h1 class="text-xl sm:text-3xl font-bold text-gray-900">Welcome to Grid Bot</h1>
+					<span class="text-xl sm:text-2xl">🚀</span>
+				</div>
+			</div>
+			
+			<div class="grid grid-cols-1 gap-4 sm:gap-8">
+				<div class="w-full overflow-x-auto">
+					<DashboardControls client:visible />
+				</div>
+				<div class="w-full overflow-x-auto">
+					<PortfolioOverview client:visible />
+				</div>
+			</div>
+		</div>
+	</div>
 </Layout>

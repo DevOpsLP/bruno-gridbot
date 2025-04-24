@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supportedExchanges } from '../utils/supported_exchanges';
+import { FaPlus, FaEdit, FaTrash, FaCheck, FaTimes, FaExchangeAlt } from 'react-icons/fa';
 
 interface ExchangeKey {
   exchange: string;
@@ -8,8 +9,6 @@ interface ExchangeKey {
   balance: number;
   leverage: number;
 }
-
-
 
 export default function ExchangesForm() {
   const [showForm, setShowForm] = useState<boolean>(false);
@@ -182,162 +181,186 @@ export default function ExchangesForm() {
   }
 
   return (
-    <div className="bg-white p-4 rounded-4xl shadow w-full">
-      {/* Top controls */}
-      <div className="flex justify-between items-center mb-4">
+    <div className="bg-white rounded-xl shadow-lg p-6">
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-6">
+        <div className="flex items-center space-x-3 mb-4 md:mb-0">
+          <FaExchangeAlt className="text-2xl text-indigo-600" />
+          <h2 className="text-xl font-bold text-gray-800">Exchange Configuration</h2>
+        </div>
         {availableExchanges.length > 0 && (
           <button
-            className="bg-blue-500 text-white px-4 py-2 rounded-4xl hover:bg-blue-600 hover:cursor-pointer"
+            className="flex items-center space-x-2 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition-colors"
             onClick={() => setShowForm(true)}
           >
-            Add New Key
+            <FaPlus />
+            <span>Add New Exchange</span>
           </button>
-        )}
-        {savedMessage && (
-          <p className="text-green-600 font-bold">{savedMessage}</p>
         )}
       </div>
 
-      {/* New key form */}
+      {savedMessage && (
+        <div className="mb-6 p-4 bg-green-50 text-green-700 rounded-lg">
+          {savedMessage}
+        </div>
+      )}
+
       {showForm && availableExchanges.length > 0 && (
-        <div className="mb-4 border p-4 rounded-4xl">
-          <div className="mb-4">
-            <label className="block mb-1 font-bold">Select Exchange</label>
-            <select
-              className="border border-gray-300 rounded-4xl w-full p-2"
-              value={selectedExchange}
-              onChange={(e) => setSelectedExchange(e.target.value)}
-            >
-              {availableExchanges.map((exch) => (
-                <option key={exch} value={exch}>
-                  {exch.toUpperCase()}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="mb-4">
-            <label className="block mb-1 font-bold">API Key</label>
-            <input
-              className="border border-gray-300 rounded-4xl w-full p-2"
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-            />
-          </div>
-          <div className="mb-4">
-            <label className="block mb-1 font-bold">API Secret</label>
-            <input
-              className="border border-gray-300 rounded-4xl w-full p-2"
-              value={apiSecret}
-              onChange={(e) => setApiSecret(e.target.value)}
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-4 mb-4">
+        <div className="mb-6 bg-gray-50 p-6 rounded-xl space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block mb-1 font-bold">Balance</label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Select Exchange</label>
+              <select
+                className="w-full border border-gray-300 rounded-lg p-2 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                value={selectedExchange}
+                onChange={(e) => setSelectedExchange(e.target.value)}
+              >
+                {availableExchanges.map((exch) => (
+                  <option key={exch} value={exch}>
+                    {exch.toUpperCase()}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">API Key</label>
+              <input
+                className="w-full border border-gray-300 rounded-lg p-2 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">API Secret</label>
+              <input
+                className="w-full border border-gray-300 rounded-lg p-2 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                value={apiSecret}
+                onChange={(e) => setApiSecret(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Balance</label>
               <input
                 type="number"
-                className="border border-gray-300 rounded-4xl w-full p-2"
+                className="w-full border border-gray-300 rounded-lg p-2 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                 value={balance}
                 onChange={(e) => setBalance(e.target.value)}
               />
             </div>
             <div>
-              <label className="block mb-1 font-bold">Leverage</label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Leverage</label>
               <input
                 type="number"
-                className="border border-gray-300 rounded-4xl w-full p-2"
+                className="w-full border border-gray-300 rounded-lg p-2 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                 value={leverage}
                 onChange={(e) => setLeverage(e.target.value)}
               />
             </div>
           </div>
-          <button
-            onClick={handleAddKey}
-            className="bg-blue-500 text-white px-4 py-2 rounded-4xl hover:bg-blue-600 hover:cursor-pointer"
-          >
-            Save Credentials
-          </button>
+          <div className="flex justify-end space-x-3">
+            <button
+              onClick={() => setShowForm(false)}
+              className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleAddKey}
+              className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+            >
+              Save Credentials
+            </button>
+          </div>
         </div>
       )}
 
-      {/* Current Exchanges Table */}
-      <div className="mt-6">
-        <h2 className="text-lg font-bold mb-2">Current Exchanges</h2>
+      <div className="overflow-x-auto">
         {exchangesList.length === 0 ? (
-          <p>No exchanges added yet.</p>
+          <div className="text-center py-8 text-gray-500">
+            No exchanges configured yet. Add your first exchange to get started.
+          </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Exchange</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">API Key</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">API Secret</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Balance</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Leverage</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {exchangesList.map((exch, idx) => (
-                  <tr key={idx}>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                      {exch.exchange.toUpperCase()}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Exchange</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">API Key</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">API Secret</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Balance</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Leverage</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {exchangesList.map((exch, idx) => (
+                <tr key={idx} className="hover:bg-gray-50">
+                  <td className="px-4 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                    {exch.exchange.toUpperCase()}
+                  </td>
+                  <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-500">
+                    {editingExchange === exch.exchange ? (
+                      <input
+                        className="w-full border border-gray-300 rounded-lg p-1 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                        value={editApiKey}
+                        onChange={(e) => setEditApiKey(e.target.value)}
+                      />
+                    ) : (
+                      maskKey(exch.apiKey)
+                    )}
+                  </td>
+                  <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-500">
+                    {editingExchange === exch.exchange ? (
+                      <input
+                        className="w-full border border-gray-300 rounded-lg p-1 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                        value={editApiSecret}
+                        onChange={(e) => setEditApiSecret(e.target.value)}
+                      />
+                    ) : (
+                      maskKey(exch.apiSecret)
+                    )}
+                  </td>
+                  <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-500">
+                    {editingExchange === exch.exchange ? (
+                      <input
+                        type="number"
+                        className="w-full border border-gray-300 rounded-lg p-1 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                        value={editBalance}
+                        onChange={(e) => setEditBalance(e.target.value)}
+                      />
+                    ) : (
+                      exch.balance
+                    )}
+                  </td>
+                  <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-500">
+                    {editingExchange === exch.exchange ? (
+                      <input
+                        type="number"
+                        className="w-full border border-gray-300 rounded-lg p-1 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                        value={editLeverage}
+                        onChange={(e) => setEditLeverage(e.target.value)}
+                      />
+                    ) : (
+                      exch.leverage
+                    )}
+                  </td>
+                  <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-500">
+                    <div className="flex items-center space-x-2">
                       {editingExchange === exch.exchange ? (
-                        <input
-                          className="border border-gray-300 rounded-4xl p-1"
-                          value={editApiKey}
-                          onChange={(e) => setEditApiKey(e.target.value)}
-                        />
-                      ) : (
-                        maskKey(exch.apiKey)
-                      )}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {editingExchange === exch.exchange ? (
-                        <input
-                          className="border border-gray-300 rounded-4xl p-1"
-                          value={editApiSecret}
-                          onChange={(e) => setEditApiSecret(e.target.value)}
-                        />
-                      ) : (
-                        maskKey(exch.apiSecret)
-                      )}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {editingExchange === exch.exchange ? (
-                        <input
-                          type="number"
-                          className="border border-gray-300 rounded-4xl p-1"
-                          value={editBalance}
-                          onChange={(e) => setEditBalance(e.target.value)}
-                        />
-                      ) : (
-                        exch.balance
-                      )}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {editingExchange === exch.exchange ? (
-                        <input
-                          type="number"
-                          className="border border-gray-300 rounded-4xl p-1"
-                          value={editLeverage}
-                          onChange={(e) => setEditLeverage(e.target.value)}
-                        />
-                      ) : (
-                        exch.leverage
-                      )}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 flex items-center gap-2">
-                      {editingExchange === exch.exchange ? (
-                        <button
-                          onClick={handleUpdateKey}
-                          className="text-green-600 hover:text-green-900 hover:cursor-pointer"
-                        >
-                          Save
-                        </button>
+                        <>
+                          <button
+                            onClick={handleUpdateKey}
+                            className="text-green-600 hover:text-green-800 p-1"
+                            title="Save"
+                          >
+                            <FaCheck />
+                          </button>
+                          <button
+                            onClick={() => setEditingExchange(null)}
+                            className="text-red-600 hover:text-red-800 p-1"
+                            title="Cancel"
+                          >
+                            <FaTimes />
+                          </button>
+                        </>
                       ) : (
                         <>
                           <button
@@ -348,41 +371,42 @@ export default function ExchangesForm() {
                               setEditBalance(String(exch.balance));
                               setEditLeverage(String(exch.leverage));
                             }}
-                            className="hover:cursor-pointer"
+                            className="text-indigo-600 hover:text-indigo-800 p-1"
+                            title="Edit"
                           >
-                            <img src="/assets/edit.svg" alt="Edit" className="w-5 h-5" />
+                            <FaEdit />
                           </button>
                           <button
                             onClick={() => {
                               setExchangeToDelete(exch.exchange);
                               setDeleteModalOpen(true);
                             }}
-                            className="hover:cursor-pointer"
+                            className="text-red-600 hover:text-red-800 p-1"
+                            title="Delete"
                           >
-                            <img src="/assets/delete.svg" alt="Delete" className="w-5 h-5" />
+                            <FaTrash />
                           </button>
                         </>
                       )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         )}
       </div>
 
-      {/* Delete Confirmation Modal */}
       {deleteModalOpen && (
-        <div className="fixed inset-0 flex items-center justify-center backdrop-brightness-50 z-50">
-          <div className="bg-white p-6 rounded-4xl shadow-lg max-w-sm w-full">
-            <h2 className="text-xl font-bold mb-4">Confirm Deletion</h2>
-            <p className="mb-4">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white p-6 rounded-xl shadow-lg max-w-sm w-full mx-4">
+            <h2 className="text-xl font-bold text-gray-800 mb-4">Confirm Deletion</h2>
+            <p className="text-gray-600 mb-6">
               Are you sure you want to delete the API key for <strong>{exchangeToDelete?.toUpperCase()}</strong>?
             </p>
-            <div className="flex justify-end gap-2">
+            <div className="flex justify-end space-x-3">
               <button
-                className="bg-gray-300 px-4 py-2 rounded-4xl hover:bg-gray-400"
+                className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
                 onClick={() => {
                   setDeleteModalOpen(false);
                   setExchangeToDelete(null);
@@ -391,7 +415,7 @@ export default function ExchangesForm() {
                 Cancel
               </button>
               <button
-                className="bg-red-500 text-white px-4 py-2 rounded-4xl hover:bg-red-600"
+                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
                 onClick={async () => {
                   if (exchangeToDelete) {
                     await handleDeleteKey(exchangeToDelete);
@@ -400,7 +424,7 @@ export default function ExchangesForm() {
                   }
                 }}
               >
-                Confirm Delete
+                Delete
               </button>
             </div>
           </div>

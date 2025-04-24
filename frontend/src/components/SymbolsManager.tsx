@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import SymbolRow from "./SymbolRow";
+import { FaPlus, FaSave, FaEdit, FaTimes } from "react-icons/fa";
 
 interface BotSymbol {
   id: string; // Unique identifier from the backend
@@ -15,6 +16,7 @@ export default function SymbolsManager() {
   const [allSymbols, setAllSymbols] = useState<string[]>([]);
   const [symbolRows, setSymbolRows] = useState<BotSymbol[]>([]);
   const [editMode, setEditMode] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     fetchStoredSymbols();
@@ -41,6 +43,8 @@ export default function SymbolsManager() {
       }
     } catch (err) {
       console.error("Error fetching stored symbols:", err);
+    } finally {
+      setIsLoading(false);
     }
   }
 
@@ -169,52 +173,91 @@ export default function SymbolsManager() {
   }
 
   return (
-    <div className="p-4 shadow-xl rounded-xl space-y-4 w-full bg-gray-50">
-      <div className="flex justify-between items-center">
-        <h2 className="text-lg font-bold">Symbols Manager</h2>
+    <div className="bg-white rounded-xl shadow-sm p-6 space-y-6">
+      {/* Header */}
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+        <div className="flex items-center space-x-3">
+          <h2 className="text-xl font-bold text-gray-800">Symbols Manager</h2>
+          {isLoading && (
+            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-indigo-600"></div>
+          )}
+        </div>
         <button
           onClick={() => setEditMode(!editMode)}
-          className="px-3 py-1 rounded-lg border bg-gray-200 cursor-pointer"
+          className={`flex items-center justify-center space-x-2 px-4 py-2 rounded-lg transition-colors
+            ${editMode 
+              ? 'bg-red-50 text-red-600 hover:bg-red-100' 
+              : 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100'
+            }`}
         >
-          {editMode ? "Exit Edit Mode" : "Edit Symbols"}
+          {editMode ? (
+            <>
+              <FaTimes className="text-sm" />
+              <span>Exit Edit Mode</span>
+            </>
+          ) : (
+            <>
+              <FaEdit className="text-sm" />
+              <span>Edit Symbols</span>
+            </>
+          )}
         </button>
       </div>
 
-      <div className="space-y-2">
-      {symbolRows.map((row) => (
-        <SymbolRow
-          key={row.id}
-          id={row.id}                     // Pass the unique id
-          allSymbols={allSymbols}
-          defaultSymbol={row.symbol}
-          defaultTp={row.tp}
-          defaultSl={row.sl}
-          isRunning={row.running}
-          editMode={editMode}
-          onStart={() => handleStart(row.symbol)}
-          onStop={() => handleStop(row.symbol)}
-          onUpdate={updateSymbolRow}       // Updated to receive id too
-          onRemove={() => removeRow(row.id)}
-        />
-      ))}
+      {/* Symbol Rows */}
+      <div className="space-y-3">
+        {symbolRows.map((row) => (
+          <SymbolRow
+            key={row.id}
+            id={row.id}                     // Pass the unique id
+            allSymbols={allSymbols}
+            defaultSymbol={row.symbol}
+            defaultTp={row.tp}
+            defaultSl={row.sl}
+            isRunning={row.running}
+            editMode={editMode}
+            onStart={() => handleStart(row.symbol)}
+            onStop={() => handleStop(row.symbol)}
+            onUpdate={updateSymbolRow}       // Updated to receive id too
+            onRemove={() => removeRow(row.id)}
+          />
+        ))}
       </div>
 
+      {/* Edit Mode Actions */}
       {editMode && (
-        <>
+        <div className="flex flex-col md:flex-row gap-3">
           <button
             onClick={addNewRow}
-            className="w-full px-4 py-2 border-2 border-dashed rounded-lg cursor-pointer"
+            className="flex items-center justify-center space-x-2 px-4 py-2 border-2 border-dashed border-indigo-200 text-indigo-600 rounded-lg hover:bg-indigo-50 transition-colors"
           >
-            + Add Symbol
+            <FaPlus className="text-sm" />
+            <span>Add Symbol</span>
           </button>
 
           <button
             onClick={handleSave}
-            className="w-full px-4 py-2 mt-2 bg-blue-500 text-white rounded-lg cursor-pointer"
+            className="flex items-center justify-center space-x-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
           >
-            Save Changes
+            <FaSave className="text-sm" />
+            <span>Save Changes</span>
           </button>
-        </>
+        </div>
+      )}
+
+      {/* Empty State */}
+      {!isLoading && symbolRows.length === 0 && (
+        <div className="text-center py-8">
+          <p className="text-gray-500">No symbols configured yet</p>
+          {!editMode && (
+            <button
+              onClick={() => setEditMode(true)}
+              className="mt-4 text-indigo-600 hover:text-indigo-700"
+            >
+              Click here to add your first symbol
+            </button>
+          )}
+        </div>
       )}
     </div>
   );

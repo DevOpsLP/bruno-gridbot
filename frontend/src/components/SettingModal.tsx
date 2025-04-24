@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { supportedExchanges } from "../utils/supported_exchanges";
+import { FaTimes, FaSearch, FaCheck, FaPlus, FaMinus } from "react-icons/fa";
 
 interface SettingsModalProps {
   tpPercent: string;
@@ -92,103 +93,159 @@ export default function SettingsModal({
   };
 
   return (
-    <div className="fixed inset-0 flex items-center justify-center backdrop-brightness-50 bg-opacity-50 z-50">
-      <div className="bg-white p-6 rounded-4xl shadow-lg w-full max-w-md">
-        <h2 className="text-xl font-bold mb-4">Bot Settings</h2>
-
-        {/* TP% and SL% inputs */}
-        <div className="grid grid-cols-2 gap-4 mb-4">
-          <div>
-            <label className="block mb-1 font-bold">Take Profit %</label>
-            <input
-              type="number"
-              step="0.1"
-              className="border border-gray-300 rounded-4xl w-full p-2"
-              value={tpPercent}
-              onChange={(e) => setTpPercent(e.target.value)}
-            />
-          </div>
-          <div>
-            <label className="block mb-1 font-bold">Stop Loss %</label>
-            <input
-              type="number"
-              step="0.1"
-              className="border border-gray-300 rounded-4xl w-full p-2"
-              value={slPercent}
-              onChange={(e) => setSlPercent(e.target.value)}
-            />
-          </div>
-        </div>
-
-        {/* Exchange Selection */}
-        <div className="mb-4">
-          <p className="font-bold mb-2">Select Exchanges:</p>
-          <div className="flex flex-wrap gap-2">
-            {supportedExchanges.map((exchange) => (
-              <button
-                key={exchange}
-                onClick={() => handleExchangeToggle(exchange)}
-                className={`px-3 py-1 transition rounded-4xl text-sm ${
-                  selectedExchanges.includes(exchange) ? "bg-blue-500 text-white" : "border border-dashed border-blue-500 text-blue-500"
-                }`}
-              >
-                {selectedExchanges.includes(exchange) ? `- ${exchange.toUpperCase()}` : `+ ${exchange.toUpperCase()}`}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Symbol Selection */}
-        <div className="mb-4">
-          <p className="font-bold mb-2">Manage Symbols:</p>
-          <input
-            type="text"
-            placeholder="Search Binance Symbols..."
-            className="border border-gray-300 rounded-4xl w-full p-2 mb-2"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-          />
-          <div className="bg-white border rounded-md shadow max-h-32 overflow-y-auto">
-            {binanceSymbols
-              .filter((s) => s.includes(searchTerm.toUpperCase()))
-              .map((s) => (
-                <div
-                  key={s}
-                  className="px-3 py-2 hover:bg-gray-100 cursor-pointer"
-                  onClick={() => handleSymbolToggle(s)}
-                >
-                  {selectedSymbols.includes(s) ? `✓ ${s}` : s}
-                </div>
-              ))}
-          </div>
-        </div>
-
-        {/* Selected Symbols (as pills) */}
-        <div className="flex flex-wrap gap-2 mt-2">
-          {selectedSymbols.map((symbol) => (
-            <div
-              key={symbol}
-              className="flex items-center bg-blue-500 text-white px-3 py-1 rounded-4xl text-sm"
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl shadow-lg w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+        <div className="p-6 border-b border-gray-200">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-bold text-gray-800">Bot Settings</h2>
+            <button
+              onClick={onClose}
+              className="text-gray-500 hover:text-gray-700 transition-colors"
             >
-              {symbol}
-              <button
-                className="ml-2 text-lg"
-                onClick={() => handleSymbolToggle(symbol)}
-              >
-                &times;
-              </button>
-            </div>
-          ))}
+              <FaTimes size={20} />
+            </button>
+          </div>
         </div>
 
-        {/* Buttons */}
-        <div className="flex justify-end gap-2 mt-4">
-          <button className="bg-gray-300 px-4 py-2 rounded-4xl" onClick={onClose}>
-            Cancel
-          </button>
-          <button className="bg-blue-500 px-4 py-2 text-white rounded-4xl" onClick={handleSave}>
-            Save
-          </button>
+        <div className="p-6 space-y-6">
+          {/* TP% and SL% inputs */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Take Profit %
+              </label>
+              <div className="relative">
+                <input
+                  type="number"
+                  step="0.1"
+                  className="w-full border border-gray-300 rounded-lg p-2 pl-3 pr-8 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                  value={tpPercent}
+                  onChange={(e) => setTpPercent(e.target.value)}
+                />
+                <span className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500">%</span>
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Stop Loss %
+              </label>
+              <div className="relative">
+                <input
+                  type="number"
+                  step="0.1"
+                  className="w-full border border-gray-300 rounded-lg p-2 pl-3 pr-8 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                  value={slPercent}
+                  onChange={(e) => setSlPercent(e.target.value)}
+                />
+                <span className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500">%</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Exchange Selection */}
+          <div>
+            <h3 className="text-sm font-medium text-gray-700 mb-3">Select Exchanges</h3>
+            <div className="flex flex-wrap gap-2">
+              {supportedExchanges.map((exchange) => (
+                <button
+                  key={exchange}
+                  onClick={() => handleExchangeToggle(exchange)}
+                  className={`flex items-center space-x-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors
+                    ${selectedExchanges.includes(exchange)
+                      ? 'bg-indigo-600 text-white hover:bg-indigo-700'
+                      : 'border border-indigo-600 text-indigo-600 hover:bg-indigo-50'
+                    }`}
+                >
+                  {selectedExchanges.includes(exchange) ? (
+                    <>
+                      <FaMinus size={14} />
+                      <span>{exchange.toUpperCase()}</span>
+                    </>
+                  ) : (
+                    <>
+                      <FaPlus size={14} />
+                      <span>{exchange.toUpperCase()}</span>
+                    </>
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Symbol Selection */}
+          <div>
+            <h3 className="text-sm font-medium text-gray-700 mb-3">Manage Symbols</h3>
+            <div className="relative mb-4">
+              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                <FaSearch className="text-gray-400" />
+              </div>
+              <input
+                type="text"
+                placeholder="Search Binance Symbols..."
+                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+            </div>
+            <div className="bg-white border border-gray-200 rounded-lg shadow-sm max-h-48 overflow-y-auto">
+              {binanceSymbols
+                .filter((s) => s.includes(searchTerm.toUpperCase()))
+                .map((s) => (
+                  <div
+                    key={s}
+                    className={`flex items-center justify-between px-4 py-2 hover:bg-gray-50 cursor-pointer transition-colors
+                      ${selectedSymbols.includes(s) ? 'bg-indigo-50' : ''}`}
+                    onClick={() => handleSymbolToggle(s)}
+                  >
+                    <span className="text-sm text-gray-700">{s}</span>
+                    {selectedSymbols.includes(s) && (
+                      <FaCheck className="text-indigo-600" size={14} />
+                    )}
+                  </div>
+                ))}
+            </div>
+          </div>
+
+          {/* Selected Symbols */}
+          {selectedSymbols.length > 0 && (
+            <div>
+              <h3 className="text-sm font-medium text-gray-700 mb-3">Selected Symbols</h3>
+              <div className="flex flex-wrap gap-2">
+                {selectedSymbols.map((symbol) => (
+                  <div
+                    key={symbol}
+                    className="flex items-center space-x-2 bg-indigo-100 text-indigo-700 px-3 py-1 rounded-lg text-sm"
+                  >
+                    <span>{symbol}</span>
+                    <button
+                      onClick={() => handleSymbolToggle(symbol)}
+                      className="text-indigo-600 hover:text-indigo-800"
+                    >
+                      <FaTimes size={12} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="p-6 border-t border-gray-200 bg-gray-50 rounded-b-xl">
+          <div className="flex justify-end space-x-3">
+            <button
+              onClick={onClose}
+              className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleSave}
+              className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+            >
+              Save Settings
+            </button>
+          </div>
         </div>
       </div>
     </div>
