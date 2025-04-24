@@ -5,7 +5,7 @@ import SymbolsManager from "./SymbolsManager";
 import { FaRobot, FaExchangeAlt, FaChartLine } from "react-icons/fa";
 
 export default function DashboardControls() {
-  const [globalStatus, setGlobalStatus] = useState("stopped");
+  const [globalStatus, setGlobalStatus] = useState<string>("stopped");
   const API_URL = import.meta.env.PUBLIC_API_URL || "http://localhost:8000";
 
   useEffect(() => {
@@ -17,14 +17,17 @@ export default function DashboardControls() {
       const res = await fetch(`${API_URL}/grid-bot/status`);
       if (res.ok) {
         const data = await res.json();
-        setGlobalStatus(data.status);
+        setGlobalStatus(data.status || "stopped");
       }
     } catch (err) {
       console.error("Error checking bot status:", err);
+      setGlobalStatus("stopped");
     }
   };
 
-  const getStatusColor = (status: string) => {
+  const getStatusColor = (status: string | undefined) => {
+    if (!status) return "text-gray-500";
+    
     switch (status.toLowerCase()) {
       case "running":
         return "text-green-500";
@@ -45,7 +48,7 @@ export default function DashboardControls() {
             <div className="flex items-center space-x-2 mt-1">
               <span className="text-sm text-gray-600">Status:</span>
               <span className={`text-sm font-medium ${getStatusColor(globalStatus)}`}>
-                {globalStatus.charAt(0).toUpperCase() + globalStatus.slice(1)}
+                {globalStatus?.charAt(0).toUpperCase() + globalStatus?.slice(1) || "Stopped"}
               </span>
             </div>
           </div>
