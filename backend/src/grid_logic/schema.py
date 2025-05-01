@@ -8,3 +8,4 @@ class StartSymbolParams(BaseModel):
     
 class StopSymbolRequest(BaseModel):
     symbol: str
+    exchange: str

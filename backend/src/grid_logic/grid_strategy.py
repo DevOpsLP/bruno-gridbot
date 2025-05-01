@@ -63,37 +63,103 @@ class GridBot:
         self.websocket_connections[(exchange_instance.id, symbol)] = ws
         logger.info(f"WebSocket launched for {exchange_instance.id} - {symbol}")
 
-    def stop_symbol(self, symbol: str):
-        keys_to_stop = [key for key in self.websocket_connections if key[1] == symbol]
-        if not keys_to_stop:
-            logger.info(f"No active WebSocket for symbol {symbol}.")
-            return
-
-        for key in keys_to_stop:
+    def stop_symbol(self, symbol: str, exchange: str = None):
+        """
+        Stops the WebSocket for a symbol on a specific exchange or all exchanges.
+        Args:
+            symbol: The trading pair symbol
+            exchange: Optional exchange name. If provided, only stops the symbol on that exchange.
+        """
+        if exchange:
+            # Stop specific exchange
+            key = (exchange.lower(), symbol)
             ws = self.websocket_connections.get(key)
-            try:
-                logger.info(f"Closing WebSocket for {key}")
-                # Turn off reconnect for your library
-                if hasattr(ws, "auto_reconnect"):
-                    ws.auto_reconnect = False
-                if hasattr(ws, "reconnection"):
-                    ws.reconnection = False  # Stop internal reconnection
+            if ws:
+                try:
+                    logger.info(f"Closing WebSocket for {key}")
+                    # Disable all possible reconnection mechanisms
+                    if hasattr(ws, "auto_reconnect"):
+                        ws.auto_reconnect = False
+                    if hasattr(ws, "reconnection"):
+                        ws.reconnection = False
+                    if hasattr(ws, "keep_running"):
+                        ws.keep_running = False
+                    if hasattr(ws, "ping_interval"):
+                        ws.ping_interval = None
+                    if hasattr(ws, "ping_timeout"):
+                        ws.ping_timeout = None
 
-                # Now attempt to close properly
-                if hasattr(ws, "exit"):
-                    ws.exit()
-                elif hasattr(ws, "stop"):
-                    ws.stop()
-                elif hasattr(ws, "close"):
-                    ws.close()
-                else:
-                    logger.warning("WebSocket has no valid termination method.")
+                    # Force close the connection
+                    if hasattr(ws, "sock") and ws.sock is not None:
+                        try:
+                            ws.sock.close()
+                        except Exception as e:
+                            logger.error(f"Error closing socket: {e}")
 
-                # Remove it from the dictionary
-                del self.websocket_connections[key]
+                    # Now attempt to close properly
+                    if hasattr(ws, "exit"):
+                        ws.exit()
+                    elif hasattr(ws, "stop"):
+                        ws.stop()
+                    elif hasattr(ws, "close"):
+                        ws.close()
+                    else:
+                        logger.warning("WebSocket has no valid termination method.")
 
-            except Exception as e:
-                logger.error(f"Error closing WebSocket for {key}: {e}")
+                    # Remove it from the dictionary
+                    del self.websocket_connections[key]
+                    logger.info(f"Successfully stopped WebSocket for {key}")
+
+                except Exception as e:
+                    logger.error(f"Error closing WebSocket for {key}: {e}")
+            else:
+                logger.info(f"No active WebSocket for {symbol} on {exchange}")
+        else:
+            # Stop all exchanges (original behavior)
+            keys_to_stop = [key for key in self.websocket_connections if key[1] == symbol]
+            if not keys_to_stop:
+                logger.info(f"No active WebSocket for symbol {symbol}.")
+                return
+
+            for key in keys_to_stop:
+                ws = self.websocket_connections.get(key)
+                try:
+                    logger.info(f"Closing WebSocket for {key}")
+                    # Disable all possible reconnection mechanisms
+                    if hasattr(ws, "auto_reconnect"):
+                        ws.auto_reconnect = False
+                    if hasattr(ws, "reconnection"):
+                        ws.reconnection = False
+                    if hasattr(ws, "keep_running"):
+                        ws.keep_running = False
+                    if hasattr(ws, "ping_interval"):
+                        ws.ping_interval = None
+                    if hasattr(ws, "ping_timeout"):
+                        ws.ping_timeout = None
+
+                    # Force close the connection
+                    if hasattr(ws, "sock") and ws.sock is not None:
+                        try:
+                            ws.sock.close()
+                        except Exception as e:
+                            logger.error(f"Error closing socket: {e}")
+
+                    # Now attempt to close properly
+                    if hasattr(ws, "exit"):
+                        ws.exit()
+                    elif hasattr(ws, "stop"):
+                        ws.stop()
+                    elif hasattr(ws, "close"):
+                        ws.close()
+                    else:
+                        logger.warning("WebSocket has no valid termination method.")
+
+                    # Remove it from the dictionary
+                    del self.websocket_connections[key]
+                    logger.info(f"Successfully stopped WebSocket for {key}")
+
+                except Exception as e:
+                    logger.error(f"Error closing WebSocket for {key}: {e}")
 
     def stop(self):
         """Stops all WebSocket connections."""

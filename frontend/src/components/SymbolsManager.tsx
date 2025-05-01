@@ -127,16 +127,32 @@ export default function SymbolsManager() {
     }
   }
   // ✅ Handle stopping a bot for a symbol
-  async function handleStop(symbol: string) {
+  async function handleStop(symbol: string, exchange?: string) {
     try {
-      await fetch(`${API_URL}/grid-bot/stop-symbol`, {
+      await fetch(`${API_URL}/stop_symbol`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ symbol }),
+        body: JSON.stringify({ symbol, exchange }),
       });
 
       setSymbolRows((prev) =>
-        prev.map((row) => (row.symbol === symbol ? { ...row, running: false } : row))
+        prev.map((row) => {
+          if (row.symbol === symbol) {
+            if (exchange) {
+              // Remove specific exchange from the list
+              const updatedExchanges = row.exchanges.filter(e => e !== exchange);
+              return {
+                ...row,
+                exchanges: updatedExchanges,
+                running: updatedExchanges.length > 0
+              };
+            } else {
+              // Remove all exchanges
+              return { ...row, exchanges: [], running: false };
+            }
+          }
+          return row;
+        })
       );
     } catch (err) {
       console.error("Error stopping symbol", err);
@@ -304,17 +320,25 @@ export default function SymbolsManager() {
                       >
                         Start
                       </button>
-                      <button
-                        onClick={() => handleStop(row.symbol)}
-                        disabled={!row.running}
-                        className={`px-3 py-1 rounded ${
-                          !row.running
-                            ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                            : 'bg-red-600 text-white hover:bg-red-700'
-                        }`}
-                      >
-                        Stop
-                      </button>
+                      {row.exchanges.length > 0 && (
+                        <div className="inline-flex space-x-1">
+                          {row.exchanges.map((exchange) => (
+                            <button
+                              key={exchange}
+                              onClick={() => handleStop(row.symbol, exchange)}
+                              className="px-2 py-1 rounded bg-red-600 text-white hover:bg-red-700 text-xs"
+                            >
+                              Stop {exchange.charAt(0).toUpperCase() + exchange.slice(1)}
+                            </button>
+                          ))}
+                          <button
+                            onClick={() => handleStop(row.symbol)}
+                            className="px-2 py-1 rounded bg-red-600 text-white hover:bg-red-700 text-xs"
+                          >
+                            Stop All
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )}
                 </td>

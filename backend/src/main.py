@@ -127,20 +127,22 @@ def start_symbol_endpoint(params: StartSymbolParams, db: Session = Depends(get_d
         "message": f"Started symbol {params.symbol} on exchange {params.exchange}"
     }
     
-@app.post("/grid-bot/stop-symbol")
-def stop_symbol_endpoint(request: StopSymbolRequest):
-    """
-    Stops the WebSocket for a given symbol across all exchanges.
-    """
-    grid_bot.stop_symbol(request.symbol)
-    return {"message": f"Stopped symbol {request.symbol} across all exchanges"}
+@app.post("/stop_symbol")
+async def stop_symbol(request: StopSymbolRequest):
+    """Stop WebSocket for a specific symbol on a specific exchange"""
+    try:
+        grid_bot.stop_symbol(request.symbol, request.exchange)
+        return {"status": "success", "message": f"Stopped WebSocket for {request.symbol} on {request.exchange or 'all exchanges'}"}
+    except Exception as e:
+        logger.error(f"Error stopping WebSocket: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/grid-bot/status")
 def get_grid_bot_status(symbol: Optional[str] = None):
     """
     Returns the grid bot's global status ('running' or 'stopped') and symbol-specific statuses.
-    If a symbol is provided, only return that symbol’s status.
-    Otherwise, return all symbols’ statuses.
+    If a symbol is provided, only return that symbol's status.
+    Otherwise, return all symbols' statuses.
     """
     global_status = "running" if grid_bot.running else "stopped"
     if symbol:
