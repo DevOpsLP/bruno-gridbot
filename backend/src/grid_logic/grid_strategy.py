@@ -88,6 +88,12 @@ class GridBot:
                         ws.ping_interval = None
                     if hasattr(ws, "ping_timeout"):
                         ws.ping_timeout = None
+                    if hasattr(ws, "reconnect"):
+                        ws.reconnect = False
+                    if hasattr(ws, "should_reconnect"):
+                        ws.should_reconnect = False
+                    if hasattr(ws, "max_reconnect_attempts"):
+                        ws.max_reconnect_attempts = 0
 
                     # Force close the connection
                     if hasattr(ws, "sock") and ws.sock is not None:
@@ -112,6 +118,9 @@ class GridBot:
 
                 except Exception as e:
                     logger.error(f"Error closing WebSocket for {key}: {e}")
+                    # Even if there's an error, remove it from the dictionary
+                    if key in self.websocket_connections:
+                        del self.websocket_connections[key]
             else:
                 logger.info(f"No active WebSocket for {symbol} on {exchange}")
         else:
@@ -136,6 +145,12 @@ class GridBot:
                         ws.ping_interval = None
                     if hasattr(ws, "ping_timeout"):
                         ws.ping_timeout = None
+                    if hasattr(ws, "reconnect"):
+                        ws.reconnect = False
+                    if hasattr(ws, "should_reconnect"):
+                        ws.should_reconnect = False
+                    if hasattr(ws, "max_reconnect_attempts"):
+                        ws.max_reconnect_attempts = 0
 
                     # Force close the connection
                     if hasattr(ws, "sock") and ws.sock is not None:
@@ -160,6 +175,9 @@ class GridBot:
 
                 except Exception as e:
                     logger.error(f"Error closing WebSocket for {key}: {e}")
+                    # Even if there's an error, remove it from the dictionary
+                    if key in self.websocket_connections:
+                        del self.websocket_connections[key]
 
     def stop(self):
         """Stops all WebSocket connections."""
