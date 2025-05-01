@@ -17,7 +17,7 @@ export default function DashboardControls() {
       const res = await fetch(`${API_URL}/grid-bot/status`);
       if (res.ok) {
         const data = await res.json();
-        setGlobalStatus(data.status || "stopped");
+        setGlobalStatus(data.global_status || "stopped");
       }
     } catch (err) {
       console.error("Error checking bot status:", err);
