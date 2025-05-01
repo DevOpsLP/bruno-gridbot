@@ -18,6 +18,7 @@ export default function SymbolsManager() {
   const [symbolRows, setSymbolRows] = useState<BotSymbol[]>([]);
   const [editMode, setEditMode] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadingOperations, setLoadingOperations] = useState<{[key: string]: string}>({}); // Track loading operations
 
   useEffect(() => {
     fetchStoredSymbols();
@@ -98,12 +99,18 @@ export default function SymbolsManager() {
   // ✅ Handle starting a bot for a symbol
   async function handleStart(symbol: string) {
     try {
+      setLoadingOperations(prev => ({ ...prev, [symbol]: 'starting' }));
       const storedExchangesJson = localStorage.getItem("selectedExchanges");
       const storedExchanges = storedExchangesJson ? JSON.parse(storedExchangesJson) : [];
   
       // ✅ Return an error if no exchanges are selected
       if (storedExchanges.length === 0) {
         alert("Error: No exchanges selected. Please select at least one exchange.");
+        setLoadingOperations(prev => {
+          const newState = { ...prev };
+          delete newState[symbol];
+          return newState;
+        });
         return;
       }
   
@@ -124,11 +131,18 @@ export default function SymbolsManager() {
       );
     } catch (err) {
       console.error("Error starting symbol", err);
+    } finally {
+      setLoadingOperations(prev => {
+        const newState = { ...prev };
+        delete newState[symbol];
+        return newState;
+      });
     }
   }
   // ✅ Handle stopping a bot for a symbol
   async function handleStop(symbol: string, exchange?: string) {
     try {
+      setLoadingOperations(prev => ({ ...prev, [symbol]: 'stopping' }));
       await fetch(`${API_URL}/stop_symbol`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -156,6 +170,12 @@ export default function SymbolsManager() {
       );
     } catch (err) {
       console.error("Error stopping symbol", err);
+    } finally {
+      setLoadingOperations(prev => {
+        const newState = { ...prev };
+        delete newState[symbol];
+        return newState;
+      });
     }
   }
 
@@ -311,14 +331,14 @@ export default function SymbolsManager() {
                     <div className="space-x-2">
                       <button
                         onClick={() => handleStart(row.symbol)}
-                        disabled={row.running}
+                        disabled={row.running || loadingOperations[row.symbol] === 'starting'}
                         className={`px-3 py-1 rounded ${
-                          row.running
+                          row.running || loadingOperations[row.symbol] === 'starting'
                             ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
                             : 'bg-green-600 text-white hover:bg-green-700'
                         }`}
                       >
-                        Start
+                        {loadingOperations[row.symbol] === 'starting' ? 'Starting...' : 'Start'}
                       </button>
                       {row.exchanges.length > 0 && (
                         <div className="inline-flex space-x-1">
@@ -326,16 +346,26 @@ export default function SymbolsManager() {
                             <button
                               key={exchange}
                               onClick={() => handleStop(row.symbol, exchange)}
-                              className="px-2 py-1 rounded bg-red-600 text-white hover:bg-red-700 text-xs"
+                              disabled={loadingOperations[row.symbol] === 'stopping'}
+                              className={`px-2 py-1 rounded text-xs ${
+                                loadingOperations[row.symbol] === 'stopping'
+                                  ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                                  : 'bg-red-600 text-white hover:bg-red-700'
+                              }`}
                             >
-                              Stop {exchange.charAt(0).toUpperCase() + exchange.slice(1)}
+                              {loadingOperations[row.symbol] === 'stopping' ? 'Stopping...' : `Stop ${exchange.charAt(0).toUpperCase() + exchange.slice(1)}`}
                             </button>
                           ))}
                           <button
                             onClick={() => handleStop(row.symbol)}
-                            className="px-2 py-1 rounded bg-red-600 text-white hover:bg-red-700 text-xs"
+                            disabled={loadingOperations[row.symbol] === 'stopping'}
+                            className={`px-2 py-1 rounded text-xs ${
+                              loadingOperations[row.symbol] === 'stopping'
+                                ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                                : 'bg-red-600 text-white hover:bg-red-700'
+                            }`}
                           >
-                            Stop All
+                            {loadingOperations[row.symbol] === 'stopping' ? 'Stopping...' : 'Stop All'}
                           </button>
                         </div>
                       )}

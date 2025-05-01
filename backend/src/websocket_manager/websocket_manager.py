@@ -947,8 +947,8 @@ def start_bybit_websocket(
             close_and_sell_all(exchange_instance, symbol)
             return
 
-        # Only reconnect if auto_reconnect is True and the WebSocket is still in the registry
-        if auto_reconnect and key in registry:
+        # Only reconnect if auto_reconnect is True
+        if auto_reconnect:
             # ── reconnect in‑place ────────────────────────────────────────────────
             def _reconnect():
                 logger.info("⭮ reconnecting %s in 5s", key)
