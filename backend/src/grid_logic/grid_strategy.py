@@ -77,7 +77,7 @@ class GridBot:
             if ws:
                 try:
                     logger.info(f"Closing WebSocket for {key}")
-                    # Disable all possible reconnection mechanisms
+                    # Disable all possible reconnection mechanisms BEFORE closing
                     if hasattr(ws, "auto_reconnect"):
                         ws.auto_reconnect = False
                     if hasattr(ws, "reconnection"):
@@ -134,7 +134,7 @@ class GridBot:
                 ws = self.websocket_connections.get(key)
                 try:
                     logger.info(f"Closing WebSocket for {key}")
-                    # Disable all possible reconnection mechanisms
+                    # Disable all possible reconnection mechanisms BEFORE closing
                     if hasattr(ws, "auto_reconnect"):
                         ws.auto_reconnect = False
                     if hasattr(ws, "reconnection"):
