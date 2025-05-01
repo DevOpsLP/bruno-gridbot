@@ -113,29 +113,38 @@ class GridBot:
 
     def get_symbol_status(self, symbol: str):
         """
-        Returns a dict with 'status' and 'exchange' if the WebSocket for the specified symbol is active,
+        Returns a dict with 'status' and 'exchanges' if the WebSocket for the specified symbol is active,
         otherwise returns 'stopped' status.
         """
+        running_exchanges = []
         for (exchange, sym), ws in self.websocket_connections.items():
             if sym == symbol:
-                status = 'running' if (hasattr(ws, 'sock') and ws.sock is not None and ws.sock.connected) or ws else 'stopped'
-                return {
-                    'status': status,
-                    'exchange': exchange
-                }
-        return {'status': 'stopped', 'exchange': None}
+                if (hasattr(ws, 'sock') and ws.sock is not None and ws.sock.connected) or ws:
+                    running_exchanges.append(exchange)
+        
+        return {
+            'status': 'running' if running_exchanges else 'stopped',
+            'exchanges': running_exchanges
+        }
 
     def get_all_symbols_status(self):
         """
-        Returns a dict of symbol -> {'status': 'running'/'stopped', 'exchange': exchange_name} 
+        Returns a dict of symbol -> {'status': 'running'/'stopped', 'exchanges': [exchange_names]} 
         for each active WebSocket.
         """
         status = {}
+        # First collect all exchanges for each symbol
         for (exchange, sym), ws in self.websocket_connections.items():
-            status[sym] = {
-                'status': 'running' if (hasattr(ws, 'sock') and ws.sock is not None and ws.sock.connected) or ws else 'stopped',
-                'exchange': exchange
-            }
+            if sym not in status:
+                status[sym] = {'exchanges': []}
+            
+            if (hasattr(ws, 'sock') and ws.sock is not None and ws.sock.connected) or ws:
+                status[sym]['exchanges'].append(exchange)
+        
+        # Then set the status based on whether there are any running exchanges
+        for sym in status:
+            status[sym]['status'] = 'running' if status[sym]['exchanges'] else 'stopped'
+        
         return status
 
 # Global instance for API control

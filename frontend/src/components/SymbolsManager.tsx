@@ -8,7 +8,7 @@ interface BotSymbol {
   tp: number;
   sl: number;
   running: boolean;
-  exchange?: string | null;
+  exchanges: string[];
 }
 
 const API_URL = import.meta.env.PUBLIC_API_URL || "http://localhost:8000";
@@ -37,7 +37,7 @@ export default function SymbolsManager() {
             tp: s.configs.length > 0 ? s.configs[0].tp_percent : 2.0,
             sl: s.configs.length > 0 ? s.configs[0].sl_percent : 1.0,
             running: false, // We'll update this from the /status endpoint below
-            exchange: null
+            exchanges: []
           }))
         );
         // Now fetch the running/stopped status for each symbol
@@ -72,7 +72,7 @@ export default function SymbolsManager() {
             return {
               ...row,
               running: symbolStatus?.status === "running",
-              exchange: symbolStatus?.exchange || null
+              exchanges: symbolStatus?.exchanges || []
             };
           })
         );
@@ -86,7 +86,7 @@ export default function SymbolsManager() {
     if (!editMode) return;
     setSymbolRows((prev) => [
       ...prev,
-      { id: `new-${Date.now()}`, symbol: "", tp: 2.0, sl: 1.0, running: false, exchange: null },
+      { id: `new-${Date.now()}`, symbol: "", tp: 2.0, sl: 1.0, running: false, exchanges: [] },
     ]);
   }
 
@@ -201,7 +201,7 @@ export default function SymbolsManager() {
                 Symbol
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Exchange
+                Exchanges
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 TP %
@@ -234,7 +234,20 @@ export default function SymbolsManager() {
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
                   <span className="text-sm text-gray-500">
-                    {row.exchange ? row.exchange.charAt(0).toUpperCase() + row.exchange.slice(1) : '-'}
+                    {row.exchanges.length > 0 ? (
+                      <div className="flex flex-wrap gap-1">
+                        {row.exchanges.map((exchange, index) => (
+                          <span 
+                            key={index}
+                            className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800"
+                          >
+                            {exchange.charAt(0).toUpperCase() + exchange.slice(1)}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      '-'
+                    )}
                   </span>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
