@@ -973,6 +973,7 @@ def start_bybit_websocket(
 
     # ── 5. launch ───────────────────────────────────────────────────────────────
     ws_app = build_ws()
+    ws_app.auto_reconnect = auto_reconnect  # Set the auto_reconnect attribute
     registry[key] = ws_app
 
     threading.Thread(
