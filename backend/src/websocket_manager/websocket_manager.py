@@ -943,6 +943,7 @@ def start_bybit_websocket(
         registry.pop(key, None)  # delete stale reference
 
         if not auto_reconnect:
+            logger.info("Forced closure detected; closing orders.")
             close_and_sell_all(exchange_instance, symbol)
             return
 
