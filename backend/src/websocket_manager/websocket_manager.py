@@ -942,13 +942,8 @@ def start_bybit_websocket(
         logger.warning("❌ WS closed (%s – %s)", code, msg)
         registry.pop(key, None)  # delete stale reference
 
-        if not auto_reconnect:
-            logger.info("Forced closure detected; closing orders.")
-            close_and_sell_all(exchange_instance, symbol)
-            return
-
-        # Only reconnect if auto_reconnect is True
-        if auto_reconnect:
+        # Only reconnect if auto_reconnect is True and the WebSocket is still in the registry
+        if auto_reconnect and key in registry:
             # ── reconnect in‑place ────────────────────────────────────────────────
             def _reconnect():
                 logger.info("⭮ reconnecting %s in 5s", key)
@@ -958,8 +953,11 @@ def start_bybit_websocket(
                     target=lambda: new_ws.run_forever(ping_interval=20, ping_timeout=10),
                     daemon=True
                 ).start()
-
+        
             threading.Timer(5, _reconnect).start()
+        else:
+            close_and_sell_all(exchange_instance, symbol)
+
 
     # ── 4. builder so we can reuse in reconnect ─────────────────────────────────
     def build_ws():
