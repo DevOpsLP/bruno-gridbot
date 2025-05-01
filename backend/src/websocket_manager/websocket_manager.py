@@ -946,17 +946,19 @@ def start_bybit_websocket(
             close_and_sell_all(exchange_instance, symbol)
             return
 
-        # ── reconnect in‑place ────────────────────────────────────────────────
-        def _reconnect():
-            logger.info("⭮ reconnecting %s in 5s", key)
-            new_ws = build_ws()
-            registry[key] = new_ws
-            threading.Thread(
-                target=lambda: new_ws.run_forever(ping_interval=20, ping_timeout=10),
-                daemon=True
-            ).start()
+        # Only reconnect if auto_reconnect is True and the WebSocket is still in the registry
+        if auto_reconnect and key in registry:
+            # ── reconnect in‑place ────────────────────────────────────────────────
+            def _reconnect():
+                logger.info("⭮ reconnecting %s in 5s", key)
+                new_ws = build_ws()
+                registry[key] = new_ws
+                threading.Thread(
+                    target=lambda: new_ws.run_forever(ping_interval=20, ping_timeout=10),
+                    daemon=True
+                ).start()
 
-        threading.Timer(5, _reconnect).start()
+            threading.Timer(5, _reconnect).start()
 
     # ── 4. builder so we can reuse in reconnect ─────────────────────────────────
     def build_ws():
