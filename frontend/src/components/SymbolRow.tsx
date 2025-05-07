@@ -67,7 +67,7 @@ export default function SymbolRow({
             <input
               type="text"
               placeholder="Search Symbol..."
-              className="w-32 pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+              className="w-56 pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
               value={searchTerm || selectedSymbol}
               onChange={(e) => setSearchTerm(e.target.value)}
               onBlur={() => {
@@ -100,7 +100,7 @@ export default function SymbolRow({
         <div className="md:col-span-3">
           <div className="flex items-center space-x-2">
             <label className="text-sm font-medium text-gray-700">TP%</label>
-            <div className="relative w-20">
+            <div className="relative w-40">
               <input
                 type="number"
                 step="0.1"
@@ -120,7 +120,7 @@ export default function SymbolRow({
         <div className="md:col-span-3">
           <div className="flex items-center space-x-2">
             <label className="text-sm font-medium text-gray-700">SL%</label>
-            <div className="relative w-20">
+            <div className="relative w-40">
               <input
                 type="number"
                 step="0.1"
