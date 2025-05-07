@@ -1034,7 +1034,7 @@ def start_bybit_websocket(
                 logger.warning(f"Error checking ping thread: {e}")
                 ws.ping_thread = None
 
-        # Remove from registry
+        # has already been removed, so this is a no-op
         registry.pop(key, None)
 
         # Only reconnect if auto_reconnect is True AND not explicitly closed
@@ -1064,6 +1064,7 @@ def start_bybit_websocket(
                     if not is_closing["value"]:
                         threading.Timer(5, _reconnect).start()
         
+            # Schedule reconnection
             threading.Timer(5, _reconnect).start()
         else:
             logger.info("WebSocket closed explicitly or auto_reconnect disabled - not reconnecting")
@@ -1086,12 +1087,40 @@ def start_bybit_websocket(
     
     # Add a close method that marks the websocket as explicitly closing to prevent reconnection
     def close_socket():
-        is_closing["value"] = True
-        logger.info(f"Explicitly closing WebSocket for {symbol}")
         try:
+            # Set the flag to prevent reconnection
+            is_closing["value"] = True
+            logger.info(f"Explicitly closing WebSocket for {symbol}")
+            
+            # Stop ping thread if it exists
+            if hasattr(ws_app, 'ping_thread') and ws_app.ping_thread is not None:
+                try:
+                    if ws_app.ping_thread.is_alive():
+                        ws_app.ping_thread = None
+                except Exception as e:
+                    logger.warning(f"Error stopping ping thread: {e}")
+                    ws_app.ping_thread = None
+            
+            # Force close the connection
+            if hasattr(ws_app, "sock") and ws_app.sock is not None:
+                try:
+                    ws_app.sock.close()
+                except Exception as e:
+                    logger.error(f"Error closing socket: {e}")
+            
+            # Close websocket
             ws_app.close()
+            
+            # Remove from registry directly to prevent any potential reconnection attempts
+            if key in registry:
+                registry.pop(key)
+                
+            logger.info(f"Successfully closed WebSocket for {symbol}")
         except Exception as e:
             logger.error(f"Error during explicit WebSocket closure: {e}")
+            # Even on error, make sure it's removed from registry
+            if key in registry:
+                registry.pop(key)
     
     # Attach our custom close method to the websocket object
     ws_app.close_socket = close_socket

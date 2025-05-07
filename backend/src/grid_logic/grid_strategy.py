@@ -73,60 +73,7 @@ class GridBot:
         if exchange:
             # Stop specific exchange
             key = (exchange.lower(), symbol)
-            ws = self.websocket_connections.get(key)
-            if ws:
-                try:
-                    logger.info(f"Closing WebSocket for {key}")
-                    # Disable all possible reconnection mechanisms BEFORE closing
-                    if hasattr(ws, "auto_reconnect"):
-                        ws.auto_reconnect = False
-                    if hasattr(ws, "reconnection"):
-                        ws.reconnection = False
-                    if hasattr(ws, "keep_running"):
-                        ws.keep_running = False
-                    if hasattr(ws, "ping_interval"):
-                        ws.ping_interval = None
-                    if hasattr(ws, "ping_timeout"):
-                        ws.ping_timeout = None
-                    if hasattr(ws, "reconnect"):
-                        ws.reconnect = False
-                    if hasattr(ws, "should_reconnect"):
-                        ws.should_reconnect = False
-                    if hasattr(ws, "max_reconnect_attempts"):
-                        ws.max_reconnect_attempts = 0
-
-                    # Stop ping thread if it exists
-                    if hasattr(ws, 'ping_thread') and ws.ping_thread and ws.ping_thread.is_alive():
-                        ws.ping_thread = None
-
-                    # Force close the connection
-                    if hasattr(ws, "sock") and ws.sock is not None:
-                        try:
-                            ws.sock.close()
-                        except Exception as e:
-                            logger.error(f"Error closing socket: {e}")
-
-                    # Now attempt to close properly
-                    if hasattr(ws, "exit"):
-                        ws.exit()
-                    elif hasattr(ws, "stop"):
-                        ws.stop()
-                    elif hasattr(ws, "close"):
-                        ws.close()
-                    else:
-                        logger.warning("WebSocket has no valid termination method.")
-
-                    # Remove it from the dictionary
-                    del self.websocket_connections[key]
-                    logger.info(f"Successfully stopped WebSocket for {key}")
-
-                except Exception as e:
-                    logger.error(f"Error closing WebSocket for {key}: {e}")
-                    # Even if there's an error, remove it from the dictionary
-                    if key in self.websocket_connections:
-                        del self.websocket_connections[key]
-            else:
-                logger.info(f"No active WebSocket for {symbol} on {exchange}")
+            self._close_websocket_connection(key)
         else:
             # Stop all exchanges (original behavior)
             keys_to_stop = [key for key in self.websocket_connections if key[1] == symbol]
@@ -135,66 +82,86 @@ class GridBot:
                 return
 
             for key in keys_to_stop:
-                ws = self.websocket_connections.get(key)
+                self._close_websocket_connection(key)
+
+    def _close_websocket_connection(self, key):
+        """
+        Helper method to close a WebSocket connection properly.
+        Uses the specialized close method if available.
+        """
+        ws = self.websocket_connections.get(key)
+        if not ws:
+            logger.info(f"No active WebSocket for {key}")
+            return
+            
+        try:
+            logger.info(f"Closing WebSocket for {key}")
+            
+            # First use close_socket method if available (Bybit uses this)
+            if hasattr(ws, "close_socket"):
+                logger.info(f"Using custom close_socket method for {key}")
+                ws.close_socket()
+                
+                # We should NOT remove from dictionary here - the close_socket method will
+                # set flags to prevent reconnection, and the websocket's on_close will
+                # remove it from the dictionary after socket is closed
+                return
+                
+            # For other WebSockets, disable all reconnection mechanisms before closing
+            if hasattr(ws, "auto_reconnect"):
+                ws.auto_reconnect = False
+            if hasattr(ws, "reconnection"):
+                ws.reconnection = False
+            if hasattr(ws, "keep_running"):
+                ws.keep_running = False
+            if hasattr(ws, "ping_interval"):
+                ws.ping_interval = None
+            if hasattr(ws, "ping_timeout"):
+                ws.ping_timeout = None
+            if hasattr(ws, "reconnect"):
+                ws.reconnect = False
+            if hasattr(ws, "should_reconnect"):
+                ws.should_reconnect = False
+            if hasattr(ws, "max_reconnect_attempts"):
+                ws.max_reconnect_attempts = 0
+
+            # Stop ping thread if it exists
+            if hasattr(ws, 'ping_thread') and ws.ping_thread and ws.ping_thread.is_alive():
+                ws.ping_thread = None
+
+            # Force close the connection
+            if hasattr(ws, "sock") and ws.sock is not None:
                 try:
-                    logger.info(f"Closing WebSocket for {key}")
-                    # Disable all possible reconnection mechanisms BEFORE closing
-                    if hasattr(ws, "auto_reconnect"):
-                        ws.auto_reconnect = False
-                    if hasattr(ws, "reconnection"):
-                        ws.reconnection = False
-                    if hasattr(ws, "keep_running"):
-                        ws.keep_running = False
-                    if hasattr(ws, "ping_interval"):
-                        ws.ping_interval = None
-                    if hasattr(ws, "ping_timeout"):
-                        ws.ping_timeout = None
-                    if hasattr(ws, "reconnect"):
-                        ws.reconnect = False
-                    if hasattr(ws, "should_reconnect"):
-                        ws.should_reconnect = False
-                    if hasattr(ws, "max_reconnect_attempts"):
-                        ws.max_reconnect_attempts = 0
-
-                    # Stop ping thread if it exists
-                    if hasattr(ws, 'ping_thread') and ws.ping_thread and ws.ping_thread.is_alive():
-                        ws.ping_thread = None
-
-                    # Force close the connection
-                    if hasattr(ws, "sock") and ws.sock is not None:
-                        try:
-                            ws.sock.close()
-                        except Exception as e:
-                            logger.error(f"Error closing socket: {e}")
-
-                    # Now attempt to close properly
-                    if hasattr(ws, "exit"):
-                        ws.exit()
-                    elif hasattr(ws, "stop"):
-                        ws.stop()
-                    elif hasattr(ws, "close"):
-                        ws.close()
-                    else:
-                        logger.warning("WebSocket has no valid termination method.")
-
-                    # Remove it from the dictionary
-                    del self.websocket_connections[key]
-                    logger.info(f"Successfully stopped WebSocket for {key}")
-
+                    ws.sock.close()
                 except Exception as e:
-                    logger.error(f"Error closing WebSocket for {key}: {e}")
-                    # Even if there's an error, remove it from the dictionary
-                    if key in self.websocket_connections:
-                        del self.websocket_connections[key]
+                    logger.error(f"Error closing socket: {e}")
 
+            # Now attempt to close properly using standard methods
+            if hasattr(ws, "exit"):
+                ws.exit()
+            elif hasattr(ws, "stop"):
+                ws.stop()
+            elif hasattr(ws, "close"):
+                ws.close()
+            else:
+                logger.warning("WebSocket has no valid termination method.")
+
+            # Remove it from the dictionary
+            if key in self.websocket_connections:
+                del self.websocket_connections[key]
+            logger.info(f"Successfully stopped WebSocket for {key}")
+
+        except Exception as e:
+            logger.error(f"Error closing WebSocket for {key}: {e}")
+            # Even if there's an error, remove it from the dictionary
+            if key in self.websocket_connections:
+                del self.websocket_connections[key]
+                
     def stop(self):
         """Stops all WebSocket connections."""
         logger.info("Stopping all WebSocket connections...")
-        for key, ws in list(self.websocket_connections.items()):
-            try:
-                ws.close()
-            except Exception as e:
-                logger.error(f"Error closing WebSocket for {key}: {e}")
+        for key in list(self.websocket_connections.keys()):
+            self._close_websocket_connection(key)
         self.websocket_connections.clear()
         logger.info("All WebSocket connections closed.")
 
