@@ -213,12 +213,23 @@ export default function SymbolsManager() {
   return (
     <div className="space-y-4">
       <div className="flex justify-between items-center">
-        <button
-          onClick={() => setEditMode(!editMode)}
-          className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
-        >
-          {editMode ? "Cancel" : "Edit Symbols"}
-        </button>
+        <div className="space-x-2">
+          <button
+            onClick={() => setEditMode(!editMode)}
+            className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+          >
+            {editMode ? "Cancel" : "Edit Symbols"}
+          </button>
+          {editMode && (
+            <button
+              onClick={addNewRow}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+            >
+              <FaPlus className="w-4 h-4" />
+              Add Symbol
+            </button>
+          )}
+        </div>
         {editMode && (
           <button
             onClick={handleSave}
