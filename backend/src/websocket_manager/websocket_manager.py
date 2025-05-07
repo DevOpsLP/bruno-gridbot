@@ -929,6 +929,9 @@ def start_bybit_websocket(
     key     = (exchange_instance.id, symbol)          # registry key
     by_sym  = symbol.replace("/", "")                 # e.g. DOGE/USDC → DOGEUSDC
 
+    # Flag to track explicit closure
+    is_closing = {"value": False}
+
     # ── 2. inner helpers ────────────────────────────────────────────────────────
     def _sig(secret, expires):  # sign the auth payload
         payload = f"GET/realtime{expires}"
@@ -949,7 +952,7 @@ def start_bybit_websocket(
         def ping_thread():
             while True:
                 try:
-                    if ws.sock and ws.sock.connected:
+                    if ws.sock and ws.sock.connected and not is_closing["value"]:
                         ws.send(json.dumps({"op": "ping"}))
                     time.sleep(20)  # Send ping every 20 seconds
                 except Exception as e:
@@ -1034,10 +1037,16 @@ def start_bybit_websocket(
         # Remove from registry
         registry.pop(key, None)
 
-        # Only reconnect if auto_reconnect is True AND we didn't explicitly close it
-        if auto_reconnect and code != 1000:  # 1000 is normal closure
+        # Only reconnect if auto_reconnect is True AND not explicitly closed
+        # Check both the code (1000 = normal closure) and our explicit close flag
+        if auto_reconnect and code != 1000 and not is_closing["value"]:
             def _reconnect():
                 try:
+                    # Don't attempt to reconnect if we've explicitly closed
+                    if is_closing["value"]:
+                        logger.info("Reconnection canceled - WebSocket was explicitly closed")
+                        return
+                        
                     logger.info("⭮ reconnecting %s in 5s", key)
                     new_ws = build_ws()
                     registry[key] = new_ws
@@ -1051,13 +1060,16 @@ def start_bybit_websocket(
                     ).start()
                 except Exception as e:
                     logger.error(f"Failed to reconnect: {e}")
-                    # Try again in 5 seconds
-                    threading.Timer(5, _reconnect).start()
+                    # Try again in 5 seconds if not explicitly closed
+                    if not is_closing["value"]:
+                        threading.Timer(5, _reconnect).start()
         
             threading.Timer(5, _reconnect).start()
         else:
             logger.info("WebSocket closed explicitly or auto_reconnect disabled - not reconnecting")
-            close_and_sell_all(exchange_instance, symbol)
+            # Only call close_and_sell_all if this wasn't an explicit closure through our API
+            if not is_closing["value"]:
+                close_and_sell_all(exchange_instance, symbol)
 
     # ── 4. builder so we can reuse in reconnect ─────────────────────────────────
     def build_ws():
@@ -1071,7 +1083,20 @@ def start_bybit_websocket(
 
     # ── 5. launch ───────────────────────────────────────────────────────────────
     ws_app = build_ws()
-    # We don't need to set auto_reconnect as an attribute since we check it directly in on_close
+    
+    # Add a close method that marks the websocket as explicitly closing to prevent reconnection
+    def close_socket():
+        is_closing["value"] = True
+        logger.info(f"Explicitly closing WebSocket for {symbol}")
+        try:
+            ws_app.close()
+        except Exception as e:
+            logger.error(f"Error during explicit WebSocket closure: {e}")
+    
+    # Attach our custom close method to the websocket object
+    ws_app.close_socket = close_socket
+    
+    # Store in registry
     registry[key] = ws_app
 
     threading.Thread(
