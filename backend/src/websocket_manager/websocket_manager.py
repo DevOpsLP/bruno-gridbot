@@ -1021,8 +1021,13 @@ def start_bybit_websocket(
         logger.warning("❌ WS closed (%s – %s)", code, msg)
         
         # Stop ping thread if it exists
-        if hasattr(ws, 'ping_thread') and ws.ping_thread.is_alive():
-            ws.ping_thread = None
+        if hasattr(ws, 'ping_thread') and ws.ping_thread is not None:
+            try:
+                if ws.ping_thread.is_alive():
+                    ws.ping_thread = None
+            except Exception as e:
+                logger.warning(f"Error checking ping thread: {e}")
+                ws.ping_thread = None
 
         # Remove from registry
         registry.pop(key, None)
