@@ -219,53 +219,19 @@ def initialize_orders(exchange, symbol, amount, tp_percent, sl_percent,
 
     if exchange.id == 'bitmart' or exchange.id == 'gateio':
         order_size = amount
-    
-    # Cancel any existing orders and verify cancellation
+        
+    # Use the existing close_and_sell_all function to cancel orders and sell positions
     try:
-        open_orders = exchange.fetch_open_orders(symbol)
-        logger.info(f"Found {len(open_orders)} open orders to cancel")
+        logger.info("Closing all existing orders and selling positions")
+        close_and_sell_all(exchange, symbol)
         
-        for order in open_orders:
-            try:
-                # Wrap in try/except to catch any errors during cancellation
-                try:
-                    result = exchange.cancel_order(order['id'], symbol)
-                    # Log full response from Bybit
-                    logger.info(f"Cancel response: {json.dumps(result)}")
-                except Exception as cancel_error:
-                    # Log the detailed error response from Bybit
-                    error_message = str(cancel_error)
-                    logger.error(f"Cancel error: {error_message}")
-                    
-                    # Extract JSON error message if present
-                    if 'bybit' in error_message and '{' in error_message:
-                        try:
-                            # Extract JSON portion from error message
-                            json_str = error_message.split('bybit', 1)[1].strip()
-                            error_json = json.loads(json_str)
-                            logger.error(f"Bybit error code: {error_json.get('retCode')}")
-                            logger.error(f"Bybit error message: {error_json.get('retMsg')}")
-                        except Exception as json_error:
-                            logger.error(f"Failed to parse error JSON: {json_error}")
-                
-                # Wait to avoid rate limits
-                time.sleep(0.3)
-            except Exception as e:
-                logger.error(f"Outer error handling cancellation: {repr(e)}")
+        # Wait for operations to complete
+        time.sleep(2)
         
-        # Check if there are still open orders
-        time.sleep(2)  # Give exchange time to process
-        remaining_orders = exchange.fetch_open_orders(symbol)
-        if remaining_orders:
-            logger.warning(f"{len(remaining_orders)} orders still remain after cancellation!")
-            logger.warning("Proceeding anyway, but some funds may still be locked")
-        else:
-            logger.info("All orders successfully canceled")
-        
-        # Check available balance
+        # Check available balance after selling all positions
         balance = exchange.fetch_balance()
         quote_balance = balance.get(quote_asset, {}).get('free', 0)
-        logger.info(f"Available {quote_asset} balance: {quote_balance}")
+        logger.info(f"Available {quote_asset} balance after closing positions: {quote_balance}")
         
         if quote_balance < amount:
             logger.error(f"Insufficient {quote_asset} balance ({quote_balance}) for order of {amount}")
@@ -274,7 +240,7 @@ def initialize_orders(exchange, symbol, amount, tp_percent, sl_percent,
     except Exception as e:
         logger.error(f"Error during order cancellation process: {repr(e)}")
         return False
-        
+
     # --- Proceed with market buy ---
     try:
         market_order = exchange.create_market_buy_order(symbol, order_size, params=params)
