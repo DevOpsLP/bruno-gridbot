@@ -1092,6 +1092,13 @@ def start_bybit_websocket(
             is_closing["value"] = True
             logger.info(f"Explicitly closing WebSocket for {symbol}")
             
+            # First call close_and_sell_all to close positions
+            try:
+                logger.info(f"Closing all positions for {symbol}")
+                close_and_sell_all(exchange_instance, symbol)
+            except Exception as e:
+                logger.error(f"Error during close_and_sell_all: {e}")
+            
             # Stop ping thread if it exists
             if hasattr(ws_app, 'ping_thread') and ws_app.ping_thread is not None:
                 try:
