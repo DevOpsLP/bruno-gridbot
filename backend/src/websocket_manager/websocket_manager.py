@@ -199,7 +199,7 @@ def run_bot_with_websocket(exchange_instance, symbol, amount, db_session, bot_in
 
     finally:
         db_session.close()
-        
+
 def initialize_orders(exchange, symbol, amount, tp_percent, sl_percent,
                       step_size, tick_size, min_notional, db_session, bot_config):
     """
@@ -235,8 +235,8 @@ def initialize_orders(exchange, symbol, amount, tp_percent, sl_percent,
             except Exception as e:
                 logger.error(f"Error canceling order {order['id']}: {repr(e)}")
         
-        # Verify all orders are canceled
-        time.sleep(1)  # Give exchange time to process
+        # Check if there are still open orders
+        time.sleep(2)  # Give exchange time to process
         remaining_orders = exchange.fetch_open_orders(symbol)
         if remaining_orders:
             logger.warning(f"{len(remaining_orders)} orders still remain after cancellation!")
@@ -311,6 +311,7 @@ def initialize_orders(exchange, symbol, amount, tp_percent, sl_percent,
     logger.info(f"Started Grid: TP Level: {actual_tp_price} / Stop Loss Levels: {actual_sl_prices}")
     db_session.commit()
     return True
+
 
 def place_limit_sell(exchange, symbol, amount, price, step_size):
     amount = Decimal(str(amount)).quantize(Decimal(str(step_size)), rounding=ROUND_DOWN)  # Fix precision
