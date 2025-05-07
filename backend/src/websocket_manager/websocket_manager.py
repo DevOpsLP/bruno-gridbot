@@ -910,12 +910,33 @@ def start_bybit_websocket(
             "args": [api_key, expires, _sig(api_secret, expires)]
         }))
         ws.send(json.dumps({"op": "subscribe", "args": ["order"]}))
+        
+        # Start ping thread
+        def ping_thread():
+            while True:
+                try:
+                    if ws.sock and ws.sock.connected:
+                        ws.send(json.dumps({"op": "ping"}))
+                    time.sleep(20)  # Send ping every 20 seconds
+                except Exception as e:
+                    logger.error(f"Error in ping thread: {e}")
+                    break
+                except:
+                    break
+        
+        ws.ping_thread = threading.Thread(target=ping_thread, daemon=True)
+        ws.ping_thread.start()
 
     def on_message(ws, raw):
         try:
             msg = json.loads(raw)
         except json.JSONDecodeError:
             logger.error("⚠️  bad JSON")
+            return
+
+        # Handle pong response
+        if msg.get("op") == "pong":
+            logger.debug("Received pong from Bybit")
             return
 
         # auth/sub ack
@@ -961,27 +982,41 @@ def start_bybit_websocket(
 
     def on_error(ws, err):
         logger.error("🚨 WS error: %s", err)
+        # Don't close here, let on_close handle reconnection
 
     def on_close(ws, code, msg):
         logger.warning("❌ WS closed (%s – %s)", code, msg)
-        registry.pop(key, None)  # delete stale reference
+        
+        # Stop ping thread if it exists
+        if hasattr(ws, 'ping_thread') and ws.ping_thread.is_alive():
+            ws.ping_thread = None
 
-        # Only reconnect if auto_reconnect is True and the WebSocket is still in the registry
-        if auto_reconnect and key in registry:
-            # ── reconnect in‑place ────────────────────────────────────────────────
+        # Remove from registry
+        registry.pop(key, None)
+
+        # Only reconnect if auto_reconnect is True
+        if auto_reconnect:
             def _reconnect():
-                logger.info("⭮ reconnecting %s in 5s", key)
-                new_ws = build_ws()
-                registry[key] = new_ws
-                threading.Thread(
-                    target=lambda: new_ws.run_forever(ping_interval=20, ping_timeout=10),
-                    daemon=True
-                ).start()
+                try:
+                    logger.info("⭮ reconnecting %s in 5s", key)
+                    new_ws = build_ws()
+                    registry[key] = new_ws
+                    threading.Thread(
+                        target=lambda: new_ws.run_forever(
+                            ping_interval=20,
+                            ping_timeout=10,
+                            skip_utf8_validation=True
+                        ),
+                        daemon=True
+                    ).start()
+                except Exception as e:
+                    logger.error(f"Failed to reconnect: {e}")
+                    # Try again in 5 seconds
+                    threading.Timer(5, _reconnect).start()
         
             threading.Timer(5, _reconnect).start()
         else:
             close_and_sell_all(exchange_instance, symbol)
-
 
     # ── 4. builder so we can reuse in reconnect ─────────────────────────────────
     def build_ws():
@@ -999,7 +1034,11 @@ def start_bybit_websocket(
     registry[key] = ws_app
 
     threading.Thread(
-        target=lambda: ws_app.run_forever(ping_interval=20, ping_timeout=10),
+        target=lambda: ws_app.run_forever(
+            ping_interval=20,
+            ping_timeout=10,
+            skip_utf8_validation=True
+        ),
         daemon=True
     ).start()
 
