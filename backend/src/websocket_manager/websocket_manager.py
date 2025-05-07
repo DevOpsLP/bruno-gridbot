@@ -227,22 +227,41 @@ def initialize_orders(exchange, symbol, amount, tp_percent, sl_percent,
         
         for order in open_orders:
             try:
-                result = exchange.cancel_order(order['id'], symbol)
-                logger.info(f"Cancel order result for {order['id']}: Status: {result.get('status', 'unknown')}")
+                # Wrap in try/except to catch any errors during cancellation
+                try:
+                    result = exchange.cancel_order(order['id'], symbol)
+                    # Log full response from Bybit
+                    logger.info(f"Cancel response: {json.dumps(result)}")
+                except Exception as cancel_error:
+                    # Log the detailed error response from Bybit
+                    error_message = str(cancel_error)
+                    logger.error(f"Cancel error: {error_message}")
+                    
+                    # Extract JSON error message if present
+                    if 'bybit' in error_message and '{' in error_message:
+                        try:
+                            # Extract JSON portion from error message
+                            json_str = error_message.split('bybit', 1)[1].strip()
+                            error_json = json.loads(json_str)
+                            logger.error(f"Bybit error code: {error_json.get('retCode')}")
+                            logger.error(f"Bybit error message: {error_json.get('retMsg')}")
+                        except Exception as json_error:
+                            logger.error(f"Failed to parse error JSON: {json_error}")
                 
-                # Wait a brief moment to prevent rate limiting
-                time.sleep(0.2)
+                # Wait to avoid rate limits
+                time.sleep(0.3)
             except Exception as e:
-                logger.error(f"Error canceling order {order['id']}: {repr(e)}")
+                logger.error(f"Outer error handling cancellation: {repr(e)}")
         
         # Check if there are still open orders
         time.sleep(2)  # Give exchange time to process
         remaining_orders = exchange.fetch_open_orders(symbol)
         if remaining_orders:
             logger.warning(f"{len(remaining_orders)} orders still remain after cancellation!")
+            logger.warning("Proceeding anyway, but some funds may still be locked")
         else:
             logger.info("All orders successfully canceled")
-            
+        
         # Check available balance
         balance = exchange.fetch_balance()
         quote_balance = balance.get(quote_asset, {}).get('free', 0)
