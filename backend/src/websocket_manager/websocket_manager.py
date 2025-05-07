@@ -264,46 +264,27 @@ def initialize_orders(exchange, symbol, amount, tp_percent, sl_percent,
     base_balance = balance.get(base_asset, {}).get('free', order_size)  # Avoid KeyError
     logger.info(f"Base balance after market buy: {base_balance} {base_asset}")
 
-    # Place TP & SL orders, then store them in the database
+    # Place TP & SL orders, then store them directly in the bot config
     actual_tp_price = place_limit_sell(exchange, symbol, base_balance, intended_tp, step_size)
     actual_sl_prices = place_limit_buys(exchange, symbol, amount, intended_sls, step_size, min_notional)
 
-    # Store TP order
-    tp_order = crud.create_order_level(
-        db_session,
-        schemas.OrderLevelBase(
-            exchange_api_key_id=bot_config.exchange_id,
-            symbol=symbol,
-            price=actual_tp_price,
-            order_type="tp",
-            status="open"
-        )
-    )
+    # Update bot config with arrays directly
+    bot_config.tp_levels_json = json.dumps([actual_tp_price])
+    bot_config.sl_levels_json = json.dumps(actual_sl_prices)
 
-    # Store SL orders
-    for sl_price in actual_sl_prices:
-        sl_order = crud.create_order_level(
-            db_session,
-            schemas.OrderLevelBase(
-                exchange_api_key_id=bot_config.exchange_id,
-                symbol=symbol,
-                price=sl_price,
-                order_type="sl",
-                status="open"
-            )
-        )
-
-    logger.info(f"Started Grid: TP Level: {actual_tp_price} / Stop Loss Levels: {actual_sl_prices}")
+    logger.info(f"Started Grid: TP Level: {bot_config.tp_levels_json} / Stop Loss Levels: {bot_config.sl_levels_json}")
     db_session.commit()
     return True
 
 
 def place_limit_sell(exchange, symbol, amount, price, step_size):
+    # Convert values to Decimal for precise comparisons and calculations
     amount = Decimal(str(amount)).quantize(Decimal(str(step_size)), rounding=ROUND_DOWN)  # Fix precision
     price = Decimal(str(price))  # Convert price to Decimal
+    min_amount = Decimal(str(step_size))  # Minimum valid amount
     
     # Check for minimum valid amount (prevent zero or very small amounts)
-    if amount <= Decimal('0') or amount < Decimal(str(step_size)):
+    if amount <= Decimal('0') or amount < min_amount:
         logger.error(f"{exchange.id}: Cannot place sell order - amount {amount} is too small (minimum: {step_size})")
         return float(price)  # Return original price without placing order
     
@@ -312,6 +293,7 @@ def place_limit_sell(exchange, symbol, amount, price, step_size):
         params["timeInForce"] = "GTC"  # Ensure order stays active until filled
     
     try:
+        logger.info(f"{exchange.id}: Attempting to place sell order: {float(amount)} @ {float(price)}")
         order = exchange.create_limit_sell_order(symbol, float(amount), float(price), params=params)
         # Special handling for Bybit
         if exchange.id == "bybit":
@@ -330,8 +312,25 @@ def place_limit_sell(exchange, symbol, amount, price, step_size):
     
 def place_limit_buys(exchange, symbol, total_usdt, prices, step_size, min_notional):
     final_prices = []
+    
+    # Validate inputs to prevent downstream errors
+    if not prices or len(prices) == 0:
+        logger.error(f"{exchange.id}: No prices provided for limit buys")
+        return []
+        
+    if total_usdt <= 0:
+        logger.error(f"{exchange.id}: Invalid total_usdt amount: {total_usdt}")
+        return [float(p) for p in prices]
+    
     for p in prices:
         p = Decimal(str(p))  # Ensure price is also a Decimal
+        
+        # Skip invalid prices
+        if p <= 0:
+            logger.error(f"{exchange.id}: Invalid price {p} for limit buy")
+            final_prices.append(float(p))
+            continue
+            
         amount = Decimal(total_usdt) / p  # Convert total_usdt to Decimal before division
         amount = amount.quantize(Decimal(str(step_size)), rounding=ROUND_DOWN)  # Fix precision
         
@@ -345,8 +344,10 @@ def place_limit_buys(exchange, symbol, total_usdt, prices, step_size, min_notion
         if exchange.id == "bybit":
             params["timeInForce"] = "GTC"  # Ensure order stays active until filled
         
-        if not min_notional or (amount * p) >= Decimal(str(min_notional)):  # Convert min_notional to Decimal
+        min_notional_decimal = Decimal(str(min_notional)) if min_notional else Decimal('0')
+        if not min_notional_decimal or (amount * p) >= min_notional_decimal:  # Convert min_notional to Decimal
             try:
+                logger.info(f"{exchange.id}: Attempting to place buy order: {float(amount)} @ {float(p)}")
                 order = exchange.create_limit_buy_order(symbol, float(amount), float(p), params=params)
                 # Special handling for Bybit
                 if exchange.id == "bybit":
@@ -974,7 +975,8 @@ def start_bybit_websocket(
 
         # auth/sub ack
         if msg.get("op") in {"auth", "subscribe"}:
-            logger.info("✅ %s %s", msg["op"], "ok" if msg.get("success") else "fail")
+            success = msg.get("success", False)
+            logger.info("✅ %s %s", msg["op"], "ok" if success else "fail")
             return
 
         data = (msg.get("data") or [])
@@ -1032,8 +1034,8 @@ def start_bybit_websocket(
         # Remove from registry
         registry.pop(key, None)
 
-        # Only reconnect if auto_reconnect is True
-        if auto_reconnect:
+        # Only reconnect if auto_reconnect is True AND we didn't explicitly close it
+        if auto_reconnect and code != 1000:  # 1000 is normal closure
             def _reconnect():
                 try:
                     logger.info("⭮ reconnecting %s in 5s", key)
@@ -1054,6 +1056,7 @@ def start_bybit_websocket(
         
             threading.Timer(5, _reconnect).start()
         else:
+            logger.info("WebSocket closed explicitly or auto_reconnect disabled - not reconnecting")
             close_and_sell_all(exchange_instance, symbol)
 
     # ── 4. builder so we can reuse in reconnect ─────────────────────────────────
@@ -1068,7 +1071,7 @@ def start_bybit_websocket(
 
     # ── 5. launch ───────────────────────────────────────────────────────────────
     ws_app = build_ws()
-    ws_app.auto_reconnect = auto_reconnect  # Set the auto_reconnect attribute
+    # We don't need to set auto_reconnect as an attribute since we check it directly in on_close
     registry[key] = ws_app
 
     threading.Thread(
@@ -1092,32 +1095,33 @@ def process_order_update(exchange_instance, symbol, bot_config_id, amount, step_
             logger.error(f"⚠️ Bot config with ID {bot_config_id} not found.")
             return
 
-        # Get open orders from database
-        open_tp_orders = crud.get_order_levels_by_exchange_and_symbol(
-            session, bot_config.exchange_id, symbol, order_type="tp"
-        )
-        open_sl_orders = crud.get_order_levels_by_exchange_and_symbol(
-            session, bot_config.exchange_id, symbol, order_type="sl"
-        )
-
+        # Safely parse JSON with error handling
+        try:
+            tp_levels = json.loads(bot_config.tp_levels_json or '[]')
+            sl_levels = json.loads(bot_config.sl_levels_json or '[]')
+        except json.JSONDecodeError:
+            logger.error(f"❌ Error parsing TP/SL levels JSON for bot {bot_config_id}")
+            return
+            
         # Add logging to help debug
-        logger.info(f"{exchange_instance.id}: Checking stored TP: {[o.price for o in open_tp_orders]}, stored SL: {[o.price for o in open_sl_orders]}")
+        logger.info(f"{exchange_instance.id}: Checking stored TP: {tp_levels}, stored SL: {sl_levels}")
 
         # Check balance before processing orders
         base_asset, quote_asset = symbol.split('/')
         balance = exchange_instance.fetch_balance()
         quote_balance = balance.get(quote_asset, {}).get('free', 0)
         base_balance = balance.get(base_asset, {}).get('free', 0)
-
+        
         # Process TP orders
-        for tp_order in open_tp_orders:
-            if current_price >= tp_order.price:
-                # Update TP order status
-                crud.update_order_level_status(session, tp_order.order_id, "filled")
-                logger.info(f"🎯 Price {current_price} hit TP {tp_order.price}")
+        for i in range(len(tp_levels)):
+            if current_price >= tp_levels[i]:
+                triggered_tp = tp_levels.pop(i)
+                bot_config.tp_levels_json = json.dumps(tp_levels)
+                session.commit()
+                logger.info(f"🎯 Price {current_price} hit TP {triggered_tp}")
 
-                # If this was the last TP, reset the grid
-                if len(open_tp_orders) == 1:
+                # If we have no TP left, it means that was the last TP
+                if len(tp_levels) == 0:
                     logger.info("All TPs filled! -> Resetting grid after delay.")
                     try:
                         open_orders = exchange_instance.fetch_open_orders(symbol)
@@ -1143,10 +1147,12 @@ def process_order_update(exchange_instance, symbol, bot_config_id, amount, step_
 
                 # Place new SL order only if we have enough quote balance
                 if quote_balance >= amount:
-                    new_sl_price = round_price(tp_order.price * (1 - sl_buffer_percent / 100), tick_size)
-                    if open_sl_orders:
-                        last_sl = min(open_sl_orders, key=lambda x: x.price)
-                        crud.delete_order_level(session, last_sl.order_id)
+                    new_sl_price = round_price(triggered_tp * (1 - sl_buffer_percent / 100), tick_size)
+
+                    # Remove the oldest (lowest) SL level
+                    if sl_levels:
+                        last_sl = min(sl_levels)
+                        sl_levels.remove(last_sl)
 
                         # Cancel the buy order matching last_sl
                         try:
@@ -1155,7 +1161,7 @@ def process_order_update(exchange_instance, symbol, bot_config_id, amount, step_
                             tolerance = 1e-8
                             order_to_cancel = None
                             for o in buy_orders:
-                                if abs(float(o.get('price', 0)) - last_sl.price) < tolerance:
+                                if abs(float(o.get('price', 0)) - last_sl) < tolerance:
                                     order_to_cancel = o
                                     break
 
@@ -1163,9 +1169,9 @@ def process_order_update(exchange_instance, symbol, bot_config_id, amount, step_
                                 exchange_instance.cancel_order(order_to_cancel['id'], symbol)
                                 logger.info(f"🛑 Cancelled last SL buy order {order_to_cancel['id']} @ {order_to_cancel['price']}")
                             else:
-                                logger.warning(f"⚠️ No buy order found matching price {last_sl.price}")
+                                logger.warning(f"⚠️ No buy order found matching price {last_sl}")
                         except Exception as e:
-                            logger.error(f"❌ Error cancelling last SL buy order @ {last_sl.price}: {e}")
+                            logger.error(f"❌ Error cancelling last SL buy order @ {last_sl}: {e}")
 
                     # Place new SL order
                     threading.Timer(
@@ -1174,30 +1180,25 @@ def process_order_update(exchange_instance, symbol, bot_config_id, amount, step_
                         args=(exchange_instance, symbol, amount, [new_sl_price], step_size, min_notional)
                     ).start()
 
-                    # Create new SL order record
-                    crud.create_order_level(
-                        session,
-                        schemas.OrderLevelBase(
-                            exchange_api_key_id=bot_config.exchange_id,
-                            symbol=symbol,
-                            price=new_sl_price,
-                            order_type="sl",
-                            status="open"
-                        )
-                    )
+                    # Add to SL levels
+                    sl_levels.append(new_sl_price)
+                    sl_levels.sort(reverse=True)  # Sort in descending order
+                    bot_config.sl_levels_json = json.dumps(sl_levels)
                     session.commit()
                 else:
                     logger.warning(f"Insufficient {quote_asset} balance ({quote_balance}) to place new SL order")
                 break
 
         # Process SL orders
-        for sl_order in open_sl_orders:
-            if current_price <= sl_order.price:
-                new_sl_price = round_price(sl_order.price * (1 - sl_buffer_percent / 100), tick_size)
-                new_sell_price = round_price(sl_order.price * (1 + sell_rebound_percent / 100), tick_size)
+        for sl_price in sl_levels[:]:  # Make a copy of the list to safely modify during iteration
+            if current_price <= sl_price:
+                sl_levels.remove(sl_price)  # Remove this triggered SL
+                
+                new_sl_price = round_price(sl_price * (1 - sl_buffer_percent / 100), tick_size)
+                new_sell_price = round_price(sl_price * (1 + sell_rebound_percent / 100), tick_size)
                 
                 # Make sure we have enough balance before placing orders
-                if base_balance <= 0:
+                if base_balance <= step_size:
                     logger.warning(f"Insufficient {base_asset} balance ({base_balance}) to place sell order")
                 else:
                     # Place the sell order only if we have balance
@@ -1207,17 +1208,9 @@ def process_order_update(exchange_instance, symbol, bot_config_id, amount, step_
                         args=(exchange_instance, symbol, base_balance, new_sell_price, step_size)
                     ).start()
                     
-                    # Create new TP order record
-                    crud.create_order_level(
-                        session,
-                        schemas.OrderLevelBase(
-                            exchange_api_key_id=bot_config.exchange_id,
-                            symbol=symbol,
-                            price=new_sell_price,
-                            order_type="tp",
-                            status="open"
-                        )
-                    )
+                    # Add to TP levels
+                    tp_levels.append(new_sell_price)
+                    tp_levels.sort(reverse=True)  # Sort in descending order
                 
                 # Place the buy order only if we have enough quote balance
                 if quote_balance >= amount:
@@ -1227,22 +1220,15 @@ def process_order_update(exchange_instance, symbol, bot_config_id, amount, step_
                         args=(exchange_instance, symbol, amount, [new_sl_price], step_size, min_notional)
                     ).start()
                     
-                    # Create new SL order record
-                    crud.create_order_level(
-                        session,
-                        schemas.OrderLevelBase(
-                            exchange_api_key_id=bot_config.exchange_id,
-                            symbol=symbol,
-                            price=new_sl_price,
-                            order_type="sl",
-                            status="open"
-                        )
-                    )
+                    # Add to SL levels
+                    sl_levels.append(new_sl_price)
+                    sl_levels.sort(reverse=True)  # Sort in descending order
                 else:
                     logger.warning(f"Insufficient {quote_asset} balance ({quote_balance}) to place new SL order")
 
-                # Update old SL order status
-                crud.update_order_level_status(session, sl_order.order_id, "filled")
+                # Update config with new arrays
+                bot_config.tp_levels_json = json.dumps(tp_levels)
+                bot_config.sl_levels_json = json.dumps(sl_levels)
                 session.commit()
                 break
 
