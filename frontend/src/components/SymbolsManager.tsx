@@ -142,7 +142,8 @@ export default function SymbolsManager() {
   // ✅ Handle stopping a bot for a symbol
   async function handleStop(symbol: string, exchange?: string) {
     try {
-      setLoadingOperations(prev => ({ ...prev, [symbol]: 'stopping' }));
+      const operationKey = exchange ? `${symbol}-${exchange}` : symbol;
+      setLoadingOperations(prev => ({ ...prev, [operationKey]: 'stopping' }));
       await fetch(`${API_URL}/stop_symbol`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -172,8 +173,9 @@ export default function SymbolsManager() {
       console.error("Error stopping symbol", err);
     } finally {
       setLoadingOperations(prev => {
+        const operationKey = exchange ? `${symbol}-${exchange}` : symbol;
         const newState = { ...prev };
-        delete newState[symbol];
+        delete newState[operationKey];
         return newState;
       });
     }
@@ -274,6 +276,8 @@ export default function SymbolsManager() {
                     defaultSl={row.sl}
                     isRunning={row.running}
                     editMode={editMode}
+                    exchanges={row.exchanges}
+                    loadingOperations={loadingOperations}
                     onStart={handleStart}
                     onStop={handleStop}
                     onRemove={() => removeRow(row.id)}
