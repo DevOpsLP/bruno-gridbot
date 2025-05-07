@@ -1,6 +1,7 @@
 from sqlalchemy.orm import Session
 from . import models, schemas
 import json
+from typing import Optional
 
 # === API Key Management ===
 
@@ -153,3 +154,43 @@ def get_trade_records_by_symbol(db: Session, symbol: str, skip: int = 0, limit: 
              .offset(skip)\
              .limit(limit)\
              .all()
+
+# === ORDER LEVEL MANAGEMENT ===
+
+def create_order_level(db: Session, order_level: schemas.OrderLevelBase):
+    db_order = models.OrderLevel(
+        exchange_api_key_id=order_level.exchange_api_key_id,
+        symbol=order_level.symbol,
+        price=order_level.price,
+        order_type=order_level.order_type,
+        order_id=order_level.order_id,
+        status=order_level.status
+    )
+    db.add(db_order)
+    db.commit()
+    db.refresh(db_order)
+    return db_order
+
+def get_order_levels_by_exchange_and_symbol(db: Session, exchange_api_key_id: int, symbol: str, order_type: Optional[str] = None):
+    query = db.query(models.OrderLevel).filter(
+        models.OrderLevel.exchange_api_key_id == exchange_api_key_id,
+        models.OrderLevel.symbol == symbol
+    )
+    if order_type:
+        query = query.filter(models.OrderLevel.order_type == order_type)
+    return query.all()
+
+def update_order_level_status(db: Session, order_id: str, status: str):
+    order = db.query(models.OrderLevel).filter(models.OrderLevel.order_id == order_id).first()
+    if order:
+        order.status = status
+        db.commit()
+        db.refresh(order)
+    return order
+
+def delete_order_level(db: Session, order_id: str):
+    order = db.query(models.OrderLevel).filter(models.OrderLevel.order_id == order_id).first()
+    if order:
+        db.delete(order)
+        db.commit()
+    return order

@@ -1,4 +1,5 @@
 import websocket  # pip install websocket-client
+from websocket import WebSocketApp  # Add this import
 import threading
 import logging
 import json
@@ -232,13 +233,36 @@ def initialize_orders(exchange, symbol, amount, tp_percent, sl_percent,
     balance = exchange.fetch_balance()
     base_balance = balance.get(base_asset, {}).get('free', order_size)  # Avoid KeyError
 
-    # Place TP & SL orders, then store them
+    # Place TP & SL orders, then store them in the database
     actual_tp_price = place_limit_sell(exchange, symbol, base_balance, intended_tp, step_size)
     actual_sl_prices = place_limit_buys(exchange, symbol, amount, intended_sls, step_size, min_notional)
 
-    bot_config.tp_levels_json = json.dumps([actual_tp_price])
-    bot_config.sl_levels_json = json.dumps(actual_sl_prices)
-    logger.info(f"Started Grid: TP Levels: {bot_config.tp_levels_json} / Stop Loss Levels: {bot_config.sl_levels_json} ")
+    # Store TP order
+    tp_order = crud.create_order_level(
+        db_session,
+        schemas.OrderLevelBase(
+            exchange_api_key_id=bot_config.exchange_id,
+            symbol=symbol,
+            price=actual_tp_price,
+            order_type="tp",
+            status="open"
+        )
+    )
+
+    # Store SL orders
+    for sl_price in actual_sl_prices:
+        sl_order = crud.create_order_level(
+            db_session,
+            schemas.OrderLevelBase(
+                exchange_api_key_id=bot_config.exchange_id,
+                symbol=symbol,
+                price=sl_price,
+                order_type="sl",
+                status="open"
+            )
+        )
+
+    logger.info(f"Started Grid: TP Level: {actual_tp_price} / Stop Loss Levels: {actual_sl_prices}")
     db_session.commit()
 
 def place_limit_sell(exchange, symbol, amount, price, step_size):
@@ -991,26 +1015,26 @@ def process_order_update(exchange_instance, symbol, bot_config_id, amount, step_
             logger.error(f"⚠️ Bot config with ID {bot_config_id} not found.")
             return
 
-        # Safely parse JSON with error handling
-        try:
-            tp_levels = json.loads(bot_config.tp_levels_json)
-            sl_levels = json.loads(bot_config.sl_levels_json)
-        except json.JSONDecodeError:
-            logger.error(f"❌ Error parsing TP/SL levels JSON for bot {bot_config_id}")
-            return
-            
+        # Get open orders from database
+        open_tp_orders = crud.get_order_levels_by_exchange_and_symbol(
+            session, bot_config.exchange_id, symbol, order_type="tp"
+        )
+        open_sl_orders = crud.get_order_levels_by_exchange_and_symbol(
+            session, bot_config.exchange_id, symbol, order_type="sl"
+        )
+
         # Add logging to help debug
-        logger.info(f"{exchange_instance.id}: Checking stored TP: {tp_levels}, stored SL: {sl_levels}")
+        logger.info(f"{exchange_instance.id}: Checking stored TP: {[o.price for o in open_tp_orders]}, stored SL: {[o.price for o in open_sl_orders]}")
 
-        for i in range(len(tp_levels)):
-            if current_price >= tp_levels[i]:
-                triggered_tp = tp_levels.pop(i)
-                bot_config.tp_levels_json = json.dumps(tp_levels)
-                session.commit()
-                logger.info(f"🎯 Price {current_price} hit TP {triggered_tp}")
+        # Process TP orders
+        for tp_order in open_tp_orders:
+            if current_price >= tp_order.price:
+                # Update TP order status
+                crud.update_order_level_status(session, tp_order.order_id, "filled")
+                logger.info(f"🎯 Price {current_price} hit TP {tp_order.price}")
 
-                # If i == 0, it means that was the last TP
-                if i == 0:
+                # If this was the last TP, reset the grid
+                if len(open_tp_orders) == 1:
                     logger.info("All TPs filled! -> Resetting grid after delay.")
                     try:
                         open_orders = exchange_instance.fetch_open_orders(symbol)
@@ -1034,12 +1058,11 @@ def process_order_update(exchange_instance, symbol, bot_config_id, amount, step_
                     )
                     return
 
-                new_sl_price = round_price(triggered_tp * (1 - sl_buffer_percent / 100), tick_size)
-
-                # Here we remove the old SL and cancel it before placing the new SL
-                if sl_levels:
-                    last_sl = min(sl_levels)
-                    sl_levels.remove(last_sl)
+                # Place new SL order
+                new_sl_price = round_price(tp_order.price * (1 - sl_buffer_percent / 100), tick_size)
+                if open_sl_orders:
+                    last_sl = min(open_sl_orders, key=lambda x: x.price)
+                    crud.delete_order_level(session, last_sl.order_id)
 
                     # Cancel the buy order matching last_sl
                     try:
@@ -1048,7 +1071,7 @@ def process_order_update(exchange_instance, symbol, bot_config_id, amount, step_
                         tolerance = 1e-8
                         order_to_cancel = None
                         for o in buy_orders:
-                            if abs(float(o.get('price', 0)) - last_sl) < tolerance:
+                            if abs(float(o.get('price', 0)) - last_sl.price) < tolerance:
                                 order_to_cancel = o
                                 break
 
@@ -1056,29 +1079,36 @@ def process_order_update(exchange_instance, symbol, bot_config_id, amount, step_
                             exchange_instance.cancel_order(order_to_cancel['id'], symbol)
                             logger.info(f"🛑 Cancelled last SL buy order {order_to_cancel['id']} @ {order_to_cancel['price']}")
                         else:
-                            logger.warning(f"⚠️ No buy order found matching price {last_sl}")
+                            logger.warning(f"⚠️ No buy order found matching price {last_sl.price}")
                     except Exception as e:
-                        logger.error(f"❌ Error cancelling last SL buy order @ {last_sl}: {e}")
+                        logger.error(f"❌ Error cancelling last SL buy order @ {last_sl.price}: {e}")
 
-                sl_levels.insert(0, new_sl_price)
-                # Place the new limit buy in 0.5s
+                # Place new SL order
                 threading.Timer(
                     0.5,
                     place_limit_buys,
                     args=(exchange_instance, symbol, amount, [new_sl_price], step_size, min_notional)
                 ).start()
-                logger.info(f"{bot_config_id}: Checking stored TP: {tp_levels}, stored SL: {sl_levels}")
 
-                bot_config.sl_levels_json = json.dumps(sl_levels)
+                # Create new SL order record
+                crud.create_order_level(
+                    session,
+                    schemas.OrderLevelBase(
+                        exchange_api_key_id=bot_config.exchange_id,
+                        symbol=symbol,
+                        price=new_sl_price,
+                        order_type="sl",
+                        status="open"
+                    )
+                )
                 session.commit()
                 break
 
-        # SL logic remains unchanged
-        for sl_price in sl_levels:
-            if current_price <= sl_price:
-                last_sl = min(sl_levels)
-                new_sl_price = round_price(last_sl * (1 - sl_buffer_percent / 100), tick_size)
-                new_sell_price = round_price(sl_price * (1 + sell_rebound_percent / 100), tick_size)
+        # Process SL orders
+        for sl_order in open_sl_orders:
+            if current_price <= sl_order.price:
+                new_sl_price = round_price(sl_order.price * (1 - sl_buffer_percent / 100), tick_size)
+                new_sell_price = round_price(sl_order.price * (1 + sell_rebound_percent / 100), tick_size)
                 base_asset, _ = symbol.split('/')
                 balance = exchange_instance.fetch_balance()
                 base_balance = balance.get(base_asset, {}).get('free', 0)
@@ -1093,6 +1123,18 @@ def process_order_update(exchange_instance, symbol, bot_config_id, amount, step_
                         place_limit_sell,
                         args=(exchange_instance, symbol, base_balance, new_sell_price, step_size)
                     ).start()
+                    
+                    # Create new TP order record
+                    crud.create_order_level(
+                        session,
+                        schemas.OrderLevelBase(
+                            exchange_api_key_id=bot_config.exchange_id,
+                            symbol=symbol,
+                            price=new_sell_price,
+                            order_type="tp",
+                            status="open"
+                        )
+                    )
                 
                 # Always place the buy order regardless of balance
                 threading.Timer(
@@ -1101,17 +1143,21 @@ def process_order_update(exchange_instance, symbol, bot_config_id, amount, step_
                     args=(exchange_instance, symbol, amount, [new_sl_price], step_size, min_notional)
                 ).start()
                 
-                sl_levels.remove(sl_price)
-                sl_levels.append(new_sl_price)
-                sl_levels.sort(reverse=True)
-                bot_config.sl_levels_json = json.dumps(sl_levels)
+                # Create new SL order record
+                crud.create_order_level(
+                    session,
+                    schemas.OrderLevelBase(
+                        exchange_api_key_id=bot_config.exchange_id,
+                        symbol=symbol,
+                        price=new_sl_price,
+                        order_type="sl",
+                        status="open"
+                    )
+                )
 
-                tp_levels.append(new_sell_price)
-                tp_levels.sort(reverse=True)
-                bot_config.tp_levels_json = json.dumps(tp_levels)
+                # Update old SL order status
+                crud.update_order_level_status(session, sl_order.order_id, "filled")
                 session.commit()
-                logger.info(f"{exchange_instance.id}: Checking stored TP: {tp_levels}, stored SL: {sl_levels}")
-
                 break
 
     except Exception as e:

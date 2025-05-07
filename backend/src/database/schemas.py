@@ -78,3 +78,19 @@ class PortfolioSymbol(BaseModel):
 
 class PortfolioResponse(BaseModel):
     portfolio: List[PortfolioSymbol]
+
+class OrderLevelBase(BaseModel):
+    exchange_api_key_id: int
+    symbol: str
+    price: float
+    order_type: str
+    order_id: Optional[str] = None
+    status: str = "open"
+
+class OrderLevel(OrderLevelBase):
+    id: int
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        orm_mode = True

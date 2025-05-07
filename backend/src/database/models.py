@@ -63,3 +63,18 @@ class TradeRecord(Base):
 
     exchange_api_key = relationship("ExchangeAPIKey")
     # REMOVED: symbol = relationship("Symbol") (no longer needed)
+
+class OrderLevel(Base):
+    __tablename__ = "order_levels"
+
+    id = Column(Integer, primary_key=True, index=True)
+    exchange_api_key_id = Column(Integer, ForeignKey("exchange_api_keys.id"), nullable=False)
+    symbol = Column(String, nullable=False)
+    price = Column(Float, nullable=False)
+    order_type = Column(String, nullable=False)  # "tp" or "sl"
+    order_id = Column(String, nullable=True)  # Exchange's order ID
+    status = Column(String, default="open")  # "open", "filled", "cancelled"
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    exchange_api_key = relationship("ExchangeAPIKey")
