@@ -1065,6 +1065,12 @@ def process_order_update(exchange_instance, symbol, bot_config_id, amount, step_
         # Add logging to help debug
         logger.info(f"{exchange_instance.id}: Checking stored TP: {[o.price for o in open_tp_orders]}, stored SL: {[o.price for o in open_sl_orders]}")
 
+        # Check balance before processing orders
+        base_asset, quote_asset = symbol.split('/')
+        balance = exchange_instance.fetch_balance()
+        quote_balance = balance.get(quote_asset, {}).get('free', 0)
+        base_balance = balance.get(base_asset, {}).get('free', 0)
+
         # Process TP orders
         for tp_order in open_tp_orders:
             if current_price >= tp_order.price:
@@ -1097,50 +1103,53 @@ def process_order_update(exchange_instance, symbol, bot_config_id, amount, step_
                     )
                     return
 
-                # Place new SL order
-                new_sl_price = round_price(tp_order.price * (1 - sl_buffer_percent / 100), tick_size)
-                if open_sl_orders:
-                    last_sl = min(open_sl_orders, key=lambda x: x.price)
-                    crud.delete_order_level(session, last_sl.order_id)
+                # Place new SL order only if we have enough quote balance
+                if quote_balance >= amount:
+                    new_sl_price = round_price(tp_order.price * (1 - sl_buffer_percent / 100), tick_size)
+                    if open_sl_orders:
+                        last_sl = min(open_sl_orders, key=lambda x: x.price)
+                        crud.delete_order_level(session, last_sl.order_id)
 
-                    # Cancel the buy order matching last_sl
-                    try:
-                        open_orders = exchange_instance.fetch_open_orders(symbol)
-                        buy_orders = [o for o in open_orders if o.get('side', '').lower() == 'buy']
-                        tolerance = 1e-8
-                        order_to_cancel = None
-                        for o in buy_orders:
-                            if abs(float(o.get('price', 0)) - last_sl.price) < tolerance:
-                                order_to_cancel = o
-                                break
+                        # Cancel the buy order matching last_sl
+                        try:
+                            open_orders = exchange_instance.fetch_open_orders(symbol)
+                            buy_orders = [o for o in open_orders if o.get('side', '').lower() == 'buy']
+                            tolerance = 1e-8
+                            order_to_cancel = None
+                            for o in buy_orders:
+                                if abs(float(o.get('price', 0)) - last_sl.price) < tolerance:
+                                    order_to_cancel = o
+                                    break
 
-                        if order_to_cancel:
-                            exchange_instance.cancel_order(order_to_cancel['id'], symbol)
-                            logger.info(f"🛑 Cancelled last SL buy order {order_to_cancel['id']} @ {order_to_cancel['price']}")
-                        else:
-                            logger.warning(f"⚠️ No buy order found matching price {last_sl.price}")
-                    except Exception as e:
-                        logger.error(f"❌ Error cancelling last SL buy order @ {last_sl.price}: {e}")
+                            if order_to_cancel:
+                                exchange_instance.cancel_order(order_to_cancel['id'], symbol)
+                                logger.info(f"🛑 Cancelled last SL buy order {order_to_cancel['id']} @ {order_to_cancel['price']}")
+                            else:
+                                logger.warning(f"⚠️ No buy order found matching price {last_sl.price}")
+                        except Exception as e:
+                            logger.error(f"❌ Error cancelling last SL buy order @ {last_sl.price}: {e}")
 
-                # Place new SL order
-                threading.Timer(
-                    0.5,
-                    place_limit_buys,
-                    args=(exchange_instance, symbol, amount, [new_sl_price], step_size, min_notional)
-                ).start()
+                    # Place new SL order
+                    threading.Timer(
+                        0.5,
+                        place_limit_buys,
+                        args=(exchange_instance, symbol, amount, [new_sl_price], step_size, min_notional)
+                    ).start()
 
-                # Create new SL order record
-                crud.create_order_level(
-                    session,
-                    schemas.OrderLevelBase(
-                        exchange_api_key_id=bot_config.exchange_id,
-                        symbol=symbol,
-                        price=new_sl_price,
-                        order_type="sl",
-                        status="open"
+                    # Create new SL order record
+                    crud.create_order_level(
+                        session,
+                        schemas.OrderLevelBase(
+                            exchange_api_key_id=bot_config.exchange_id,
+                            symbol=symbol,
+                            price=new_sl_price,
+                            order_type="sl",
+                            status="open"
+                        )
                     )
-                )
-                session.commit()
+                    session.commit()
+                else:
+                    logger.warning(f"Insufficient {quote_asset} balance ({quote_balance}) to place new SL order")
                 break
 
         # Process SL orders
@@ -1148,9 +1157,6 @@ def process_order_update(exchange_instance, symbol, bot_config_id, amount, step_
             if current_price <= sl_order.price:
                 new_sl_price = round_price(sl_order.price * (1 - sl_buffer_percent / 100), tick_size)
                 new_sell_price = round_price(sl_order.price * (1 + sell_rebound_percent / 100), tick_size)
-                base_asset, _ = symbol.split('/')
-                balance = exchange_instance.fetch_balance()
-                base_balance = balance.get(base_asset, {}).get('free', 0)
                 
                 # Make sure we have enough balance before placing orders
                 if base_balance <= 0:
@@ -1175,24 +1181,27 @@ def process_order_update(exchange_instance, symbol, bot_config_id, amount, step_
                         )
                     )
                 
-                # Always place the buy order regardless of balance
-                threading.Timer(
-                    0.5,
-                    place_limit_buys,
-                    args=(exchange_instance, symbol, amount, [new_sl_price], step_size, min_notional)
-                ).start()
-                
-                # Create new SL order record
-                crud.create_order_level(
-                    session,
-                    schemas.OrderLevelBase(
-                        exchange_api_key_id=bot_config.exchange_id,
-                        symbol=symbol,
-                        price=new_sl_price,
-                        order_type="sl",
-                        status="open"
+                # Place the buy order only if we have enough quote balance
+                if quote_balance >= amount:
+                    threading.Timer(
+                        0.5,
+                        place_limit_buys,
+                        args=(exchange_instance, symbol, amount, [new_sl_price], step_size, min_notional)
+                    ).start()
+                    
+                    # Create new SL order record
+                    crud.create_order_level(
+                        session,
+                        schemas.OrderLevelBase(
+                            exchange_api_key_id=bot_config.exchange_id,
+                            symbol=symbol,
+                            price=new_sl_price,
+                            order_type="sl",
+                            status="open"
+                        )
                     )
-                )
+                else:
+                    logger.warning(f"Insufficient {quote_asset} balance ({quote_balance}) to place new SL order")
 
                 # Update old SL order status
                 crud.update_order_level_status(session, sl_order.order_id, "filled")

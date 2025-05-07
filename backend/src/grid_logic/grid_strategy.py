@@ -95,6 +95,10 @@ class GridBot:
                     if hasattr(ws, "max_reconnect_attempts"):
                         ws.max_reconnect_attempts = 0
 
+                    # Stop ping thread if it exists
+                    if hasattr(ws, 'ping_thread') and ws.ping_thread and ws.ping_thread.is_alive():
+                        ws.ping_thread = None
+
                     # Force close the connection
                     if hasattr(ws, "sock") and ws.sock is not None:
                         try:
@@ -151,6 +155,10 @@ class GridBot:
                         ws.should_reconnect = False
                     if hasattr(ws, "max_reconnect_attempts"):
                         ws.max_reconnect_attempts = 0
+
+                    # Stop ping thread if it exists
+                    if hasattr(ws, 'ping_thread') and ws.ping_thread and ws.ping_thread.is_alive():
+                        ws.ping_thread = None
 
                     # Force close the connection
                     if hasattr(ws, "sock") and ws.sock is not None:
