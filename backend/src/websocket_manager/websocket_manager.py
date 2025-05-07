@@ -81,15 +81,10 @@ def run_bot_with_websocket(exchange_instance, symbol, amount, db_session, bot_in
         sl_levels = json.loads(bot_config.sl_levels_json or '[]')
 
         # If no TP/SL levels exist, reset the grid.
+        initialization_success = True
         if not tp_levels and not sl_levels:
             logger.info("No TP/SL levels found. Resetting orders.")
-            for order in open_orders:
-                order_id = order.get('id')
-                if order_id:
-                    exchange_instance.cancel_order(order_id, symbol)
-                    logger.info(f"Cancelled order {order_id}")
-
-            initialize_orders(
+            initialization_success = initialize_orders(
                 exchange_instance, symbol, amount, tp_percent, sl_percent,
                 step_size, tick_size, min_notional, db_session, bot_config
             )
@@ -110,7 +105,7 @@ def run_bot_with_websocket(exchange_instance, symbol, amount, db_session, bot_in
                     if order_id:
                         logger.info(f"Cancelling order ID: {order_id} at price {order.get('price', 0)}")
                         exchange_instance.cancel_order(order_id, symbol)
-                initialize_orders(
+                initialization_success = initialize_orders(
                     exchange_instance, symbol, amount, tp_percent, sl_percent,
                     step_size, tick_size, min_notional, db_session, bot_config
                 )
@@ -122,7 +117,7 @@ def run_bot_with_websocket(exchange_instance, symbol, amount, db_session, bot_in
                     if order_id:
                         logger.info(f"Cancelling order ID: {order_id} at price {order.get('price', 0)}")
                         exchange_instance.cancel_order(order_id, symbol)
-                initialize_orders(
+                initialization_success = initialize_orders(
                     exchange_instance, symbol, amount, tp_percent, sl_percent,
                     step_size, tick_size, min_notional, db_session, bot_config
                 )
@@ -151,6 +146,11 @@ def run_bot_with_websocket(exchange_instance, symbol, amount, db_session, bot_in
                     db_session.commit()
                 else:
                     logger.warning(f"Insufficient balance for {base_asset} to place TP order.")
+
+        # If initialization failed, don't start the websocket
+        if not initialization_success:
+            logger.error("Order initialization failed. Not starting WebSocket.")
+            return None
 
         exchange_id = exchange_instance.id.lower()
         
@@ -205,13 +205,13 @@ def initialize_orders(exchange, symbol, amount, tp_percent, sl_percent,
     """
     Creates fresh orders (1 Market Buy, 1 TP, 3 SL).
     """
-    base_asset, _ = symbol.split('/')
+    base_asset, quote_asset = symbol.split('/')
     current_price = exchange.fetch_ticker(symbol)['last']
     order_size = math.floor((amount / current_price) / step_size) * step_size
 
     if min_notional and order_size * current_price < min_notional:
         logger.error("Order size below min_notional; cannot proceed.")
-        return
+        return False
 
     params = {}
     if exchange.id == 'gateio' or exchange.id == 'bitmart':
@@ -219,9 +219,51 @@ def initialize_orders(exchange, symbol, amount, tp_percent, sl_percent,
 
     if exchange.id == 'bitmart' or exchange.id == 'gateio':
         order_size = amount
-    # --- Proceed with your market buy ---
-    exchange.create_market_buy_order(symbol, order_size, params=params)
-    logger.info(f"{exchange.id}: Market buy executed: {order_size} {base_asset} @ {current_price}")
+    
+    # Cancel any existing orders and verify cancellation
+    try:
+        open_orders = exchange.fetch_open_orders(symbol)
+        logger.info(f"Found {len(open_orders)} open orders to cancel")
+        
+        for order in open_orders:
+            try:
+                result = exchange.cancel_order(order['id'], symbol)
+                logger.info(f"Cancel order result for {order['id']}: Status: {result.get('status', 'unknown')}")
+                
+                # Wait a brief moment to prevent rate limiting
+                time.sleep(0.2)
+            except Exception as e:
+                logger.error(f"Error canceling order {order['id']}: {repr(e)}")
+        
+        # Verify all orders are canceled
+        time.sleep(1)  # Give exchange time to process
+        remaining_orders = exchange.fetch_open_orders(symbol)
+        if remaining_orders:
+            logger.warning(f"{len(remaining_orders)} orders still remain after cancellation!")
+        else:
+            logger.info("All orders successfully canceled")
+            
+        # Check available balance
+        balance = exchange.fetch_balance()
+        quote_balance = balance.get(quote_asset, {}).get('free', 0)
+        logger.info(f"Available {quote_asset} balance: {quote_balance}")
+        
+        if quote_balance < amount:
+            logger.error(f"Insufficient {quote_asset} balance ({quote_balance}) for order of {amount}")
+            return False
+            
+    except Exception as e:
+        logger.error(f"Error during order cancellation process: {repr(e)}")
+        return False
+        
+    # --- Proceed with market buy ---
+    try:
+        market_order = exchange.create_market_buy_order(symbol, order_size, params=params)
+        logger.info(f"{exchange.id}: Market buy executed: {order_size} {base_asset} @ {current_price}")
+        logger.info(f"Market order details: {market_order}")
+    except Exception as e:
+        logger.error(f"Failed to create market buy order: {repr(e)}")
+        return False
 
     # The "intended" prices
     intended_tp = round_price(current_price * (1 + tp_percent / 100), tick_size)
@@ -230,8 +272,12 @@ def initialize_orders(exchange, symbol, amount, tp_percent, sl_percent,
         for i in range(3)
     ]
     
+    # Wait briefly for the market order to settle
+    time.sleep(1)
+    
     balance = exchange.fetch_balance()
     base_balance = balance.get(base_asset, {}).get('free', order_size)  # Avoid KeyError
+    logger.info(f"Base balance after market buy: {base_balance} {base_asset}")
 
     # Place TP & SL orders, then store them in the database
     actual_tp_price = place_limit_sell(exchange, symbol, base_balance, intended_tp, step_size)
@@ -264,6 +310,7 @@ def initialize_orders(exchange, symbol, amount, tp_percent, sl_percent,
 
     logger.info(f"Started Grid: TP Level: {actual_tp_price} / Stop Loss Levels: {actual_sl_prices}")
     db_session.commit()
+    return True
 
 def place_limit_sell(exchange, symbol, amount, price, step_size):
     amount = Decimal(str(amount)).quantize(Decimal(str(step_size)), rounding=ROUND_DOWN)  # Fix precision
