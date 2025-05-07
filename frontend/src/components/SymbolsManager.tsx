@@ -265,121 +265,20 @@ export default function SymbolsManager() {
           <tbody className="bg-white divide-y divide-gray-200">
             {symbolRows.map((row) => (
               <tr key={row.id}>
-                <td className="px-6 py-4 whitespace-nowrap">
-                  {editMode ? (
-                    <input
-                      type="text"
-                      value={row.symbol}
-                      onChange={(e) => updateSymbolRow(row.id, e.target.value, row.tp, row.sl)}
-                      className="border rounded px-2 py-1"
-                    />
-                  ) : (
-                    <span className="text-sm font-medium text-gray-900">{row.symbol}</span>
-                  )}
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap">
-                  <span className="text-sm text-gray-500">
-                    {row.exchanges.length > 0 ? (
-                      <div className="flex flex-wrap gap-1">
-                        {row.exchanges.map((exchange, index) => (
-                          <span 
-                            key={index}
-                            className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800"
-                          >
-                            {exchange.charAt(0).toUpperCase() + exchange.slice(1)}
-                          </span>
-                        ))}
-                      </div>
-                    ) : (
-                      '-'
-                    )}
-                  </span>
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap">
-                  {editMode ? (
-                    <input
-                      type="number"
-                      value={row.tp}
-                      onChange={(e) => updateSymbolRow(row.id, row.symbol, parseFloat(e.target.value), row.sl)}
-                      className="border rounded px-2 py-1 w-20"
-                      step="0.1"
-                    />
-                  ) : (
-                    <span className="text-sm text-gray-500">{row.tp}%</span>
-                  )}
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap">
-                  {editMode ? (
-                    <input
-                      type="number"
-                      value={row.sl}
-                      onChange={(e) => updateSymbolRow(row.id, row.symbol, row.tp, parseFloat(e.target.value))}
-                      className="border rounded px-2 py-1 w-20"
-                      step="0.1"
-                    />
-                  ) : (
-                    <span className="text-sm text-gray-500">{row.sl}%</span>
-                  )}
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap">
-                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                    row.running ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                  }`}>
-                    {row.running ? 'Running' : 'Stopped'}
-                  </span>
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                  {editMode ? (
-                    <button
-                      onClick={() => removeRow(row.id)}
-                      className="text-red-600 hover:text-red-900"
-                    >
-                      Remove
-                    </button>
-                  ) : (
-                    <div className="space-x-2">
-                      <button
-                        onClick={() => handleStart(row.symbol)}
-                        disabled={row.running || loadingOperations[row.symbol] === 'starting'}
-                        className={`px-3 py-1 rounded ${
-                          row.running || loadingOperations[row.symbol] === 'starting'
-                            ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                            : 'bg-green-600 text-white hover:bg-green-700'
-                        }`}
-                      >
-                        {loadingOperations[row.symbol] === 'starting' ? 'Starting...' : 'Start'}
-                      </button>
-                      {row.exchanges.length > 0 && (
-                        <div className="inline-flex space-x-1">
-                          {row.exchanges.map((exchange) => (
-                            <button
-                              key={exchange}
-                              onClick={() => handleStop(row.symbol, exchange)}
-                              disabled={loadingOperations[row.symbol] === 'stopping'}
-                              className={`px-2 py-1 rounded text-xs ${
-                                loadingOperations[row.symbol] === 'stopping'
-                                  ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                                  : 'bg-red-600 text-white hover:bg-red-700'
-                              }`}
-                            >
-                              {loadingOperations[row.symbol] === 'stopping' ? 'Stopping...' : `Stop ${exchange.charAt(0).toUpperCase() + exchange.slice(1)}`}
-                            </button>
-                          ))}
-                          <button
-                            onClick={() => handleStop(row.symbol)}
-                            disabled={loadingOperations[row.symbol] === 'stopping'}
-                            className={`px-2 py-1 rounded text-xs ${
-                              loadingOperations[row.symbol] === 'stopping'
-                                ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                                : 'bg-red-600 text-white hover:bg-red-700'
-                            }`}
-                          >
-                            {loadingOperations[row.symbol] === 'stopping' ? 'Stopping...' : 'Stop All'}
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  )}
+                <td colSpan={6} className="p-0">
+                  <SymbolRow
+                    id={row.id}
+                    allSymbols={allSymbols}
+                    defaultSymbol={row.symbol}
+                    defaultTp={row.tp}
+                    defaultSl={row.sl}
+                    isRunning={row.running}
+                    editMode={editMode}
+                    onStart={handleStart}
+                    onStop={handleStop}
+                    onRemove={() => removeRow(row.id)}
+                    onUpdate={updateSymbolRow}
+                  />
                 </td>
               </tr>
             ))}
