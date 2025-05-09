@@ -73,7 +73,13 @@ class GridBot:
         if exchange:
             # Stop specific exchange
             key = (exchange.lower(), symbol)
-            self._close_websocket_connection(key)
+            ws = self.websocket_connections.get(key)
+            if ws:
+                # For Bybit, use the specialized close_socket method
+                if exchange.lower() == "bybit" and hasattr(ws, "close_socket"):
+                    ws.close_socket()
+                else:
+                    self._close_websocket_connection(key)
         else:
             # Stop all exchanges (original behavior)
             keys_to_stop = [key for key in self.websocket_connections if key[1] == symbol]
@@ -82,7 +88,13 @@ class GridBot:
                 return
 
             for key in keys_to_stop:
-                self._close_websocket_connection(key)
+                ws = self.websocket_connections.get(key)
+                if ws:
+                    # For Bybit, use the specialized close_socket method
+                    if key[0].lower() == "bybit" and hasattr(ws, "close_socket"):
+                        ws.close_socket()
+                    else:
+                        self._close_websocket_connection(key)
 
     def _close_websocket_connection(self, key):
         """

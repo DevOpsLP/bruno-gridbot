@@ -58,81 +58,93 @@ export default function SymbolRow({
   return (
     <div className="bg-white rounded-xl shadow-sm p-4 mb-3">
       <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-center">
-        {/* Symbol Search */}
+        {/* Symbol Display/Input */}
         <div className="md:col-span-4 relative">
-          <div className="relative">
-            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-              <FaSearch className="text-gray-400 w-3.5 h-3.5" />
-            </div>
-            <input
-              type="text"
-              placeholder="Search Symbol..."
-              className="w-56 pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-              value={searchTerm || selectedSymbol}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              onBlur={() => {
-                if (searchTerm.trim() && searchTerm !== selectedSymbol) {
-                  setSelectedSymbol(searchTerm.toUpperCase());
-                  onUpdate(id, searchTerm.toUpperCase(), tpPercent, slPercent);
-                }
-              }}
-              disabled={isRunning || editMode}
-            />
-            {searchTerm && (
-              <div className="absolute z-[100] w-48 mt-1 bg-white rounded-lg shadow-lg border border-gray-200 max-h-48 overflow-y-auto">
-                {allSymbols
-                  .filter((s) => s.includes(searchTerm.toUpperCase()))
-                  .map((s) => (
-                    <div
-                      key={s}
-                      className="px-4 py-2 hover:bg-indigo-50 cursor-pointer transition-colors"
-                      onClick={() => handleSymbolChange(s)}
-                    >
-                      <span className="text-sm text-gray-700">{s}</span>
-                    </div>
-                  ))}
+          {editMode ? (
+            <div className="relative">
+              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                <FaSearch className="text-gray-400 w-3.5 h-3.5" />
               </div>
+              <input
+                type="text"
+                placeholder="Search Symbol..."
+                className="w-56 pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                value={searchTerm || selectedSymbol}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                onBlur={() => {
+                  if (searchTerm.trim() && searchTerm !== selectedSymbol) {
+                    setSelectedSymbol(searchTerm.toUpperCase());
+                    onUpdate(id, searchTerm.toUpperCase(), tpPercent, slPercent);
+                  }
+                }}
+                disabled={isRunning}
+              />
+              {searchTerm && (
+                <div className="absolute z-[100] w-48 mt-1 bg-white rounded-lg shadow-lg border border-gray-200 max-h-48 overflow-y-auto">
+                  {allSymbols
+                    .filter((s) => s.includes(searchTerm.toUpperCase()))
+                    .map((s) => (
+                      <div
+                        key={s}
+                        className="px-4 py-2 hover:bg-indigo-50 cursor-pointer transition-colors"
+                        onClick={() => handleSymbolChange(s)}
+                      >
+                        <span className="text-sm text-gray-700">{s}</span>
+                      </div>
+                    ))}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="text-gray-900 font-medium">{selectedSymbol}</div>
+          )}
+        </div>
+
+        {/* TP Display/Input */}
+        <div className="md:col-span-3">
+          <div className="flex items-center space-x-2">
+            <label className="text-sm font-medium text-gray-700">TP%</label>
+            {editMode ? (
+              <div className="relative w-40">
+                <input
+                  type="number"
+                  step="0.1"
+                  className="w-full pl-3 pr-8 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                  value={tpPercent}
+                  onChange={(e) => setTpPercent(Number(e.target.value))}
+                  onBlur={handleUpdate}
+                  disabled={isRunning}
+                  placeholder="TP %"
+                />
+                <span className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500">%</span>
+              </div>
+            ) : (
+              <div className="text-gray-900">{tpPercent}%</div>
             )}
           </div>
         </div>
 
-        {/* TP Input */}
-        <div className="md:col-span-3">
-          <div className="flex items-center space-x-2">
-            <label className="text-sm font-medium text-gray-700">TP%</label>
-            <div className="relative w-40">
-              <input
-                type="number"
-                step="0.1"
-                className="w-full pl-3 pr-8 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                value={tpPercent}
-                onChange={(e) => setTpPercent(Number(e.target.value))}
-                onBlur={handleUpdate}
-                disabled={isRunning || editMode}
-                placeholder="TP %"
-              />
-              <span className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500">%</span>
-            </div>
-          </div>
-        </div>
-
-        {/* SL Input */}
+        {/* SL Display/Input */}
         <div className="md:col-span-3">
           <div className="flex items-center space-x-2">
             <label className="text-sm font-medium text-gray-700">SL%</label>
-            <div className="relative w-40">
-              <input
-                type="number"
-                step="0.1"
-                className="w-full pl-3 pr-8 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                value={slPercent}
-                onChange={(e) => setSlPercent(Number(e.target.value))}
-                onBlur={handleUpdate}
-                disabled={isRunning || editMode}
-                placeholder="SL %"
-              />
-              <span className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500">%</span>
-            </div>
+            {editMode ? (
+              <div className="relative w-40">
+                <input
+                  type="number"
+                  step="0.1"
+                  className="w-full pl-3 pr-8 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                  value={slPercent}
+                  onChange={(e) => setSlPercent(Number(e.target.value))}
+                  onBlur={handleUpdate}
+                  disabled={isRunning}
+                  placeholder="SL %"
+                />
+                <span className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500">%</span>
+              </div>
+            ) : (
+              <div className="text-gray-900">{slPercent}%</div>
+            )}
           </div>
         </div>
 

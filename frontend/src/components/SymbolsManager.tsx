@@ -84,11 +84,11 @@ export default function SymbolsManager() {
   }
   // ✅ Add a new row (only in edit mode)
   function addNewRow() {
-    if (!editMode) return;
     setSymbolRows((prev) => [
       ...prev,
       { id: `new-${Date.now()}`, symbol: "", tp: 2.0, sl: 1.0, running: false, exchanges: [] },
     ]);
+    setEditMode(true); // Automatically enter edit mode when adding a new symbol
   }
 
   // ✅ Remove a symbol row
@@ -215,15 +215,13 @@ export default function SymbolsManager() {
   return (
     <div className="space-y-4">
       <div className="flex justify-between items-center">
-        {editMode && (
-          <button
-            onClick={addNewRow}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2 mr-4"
-          >
-            <FaPlus className="w-4 h-4" />
-            Add Symbol
-          </button>
-        )}
+        <button
+          onClick={addNewRow}
+          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2 mr-4"
+        >
+          <FaPlus className="w-4 h-4" />
+          Add Symbol
+        </button>
         <button
           onClick={() => setEditMode(!editMode)}
           className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"

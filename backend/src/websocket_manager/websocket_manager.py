@@ -824,15 +824,43 @@ def start_gateio_websocket(exchange_instance, symbol, bot_config_id, amount,
         """Processes incoming WebSocket messages."""
         try:
             data = json.loads(message)
+            
+            # Handle ping response
+            if data.get("channel") == "spot.ping":
+                return
+                
+            # Handle auth response
+            if data.get("event") == "subscribe" and data.get("channel") == "spot.usertrades":
+                if data.get("result", {}).get("status") == "success":
+                    logger.info("✅ Gate.io WebSocket authenticated successfully")
+                return
+                
+            # Process trade data
             if "result" in data and isinstance(data["result"], list) and data["result"]:
                 trade = data["result"][0]
-                current_price = float(trade["price"])
-                process_order_update(
-                    exchange_instance, symbol, bot_config_id, amount, 
-                    step_size, tick_size, min_notional, 
-                    sl_buffer_percent, sell_rebound_percent, current_price
-                )
-                process_trade_message("gateio", data, db_session, bot_config.exchange_api_key.id)
+                if not trade or not isinstance(trade, dict):
+                    logger.warning("Invalid trade data format received")
+                    return
+                    
+                price = trade.get("price")
+                if not price:
+                    logger.warning("No price found in trade data")
+                    return
+                    
+                try:
+                    current_price = float(price)
+                    process_order_update(
+                        exchange_instance, symbol, bot_config_id, amount, 
+                        step_size, tick_size, min_notional, 
+                        sl_buffer_percent, sell_rebound_percent, current_price
+                    )
+                    process_trade_message("gateio", data, db_session, bot_config.exchange_api_key.id)
+                except (ValueError, TypeError) as e:
+                    logger.error(f"Error processing price data: {e}")
+                except Exception as e:
+                    logger.error(f"Error processing trade update: {e}")
+        except json.JSONDecodeError as e:
+            logger.error(f"Error decoding message: {e}")
         except Exception as e:
             logger.error(f"❌ Error processing Gate.io WebSocket message: {e}")
 
