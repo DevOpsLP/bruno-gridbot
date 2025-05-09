@@ -222,20 +222,33 @@ export default function SymbolsManager() {
           <FaPlus className="w-4 h-4" />
           Add Symbol
         </button>
-        <button
-          onClick={() => setEditMode(!editMode)}
-          className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
-        >
-          {editMode ? "Cancel" : "Edit Symbols"}
-        </button>
-        {editMode && (
+        <div className="flex space-x-2">
           <button
-            onClick={handleSave}
-            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors ml-auto"
+            onClick={() => setEditMode(!editMode)}
+            className={`px-4 py-2 ${editMode ? 'bg-gray-600' : 'bg-indigo-600'} text-white rounded-lg ${editMode ? 'hover:bg-gray-700' : 'hover:bg-indigo-700'} transition-colors`}
           >
-            Save Changes
+            {editMode ? (
+              <>
+                <FaTimes className="w-4 h-4 inline mr-1" />
+                Cancel
+              </>
+            ) : (
+              <>
+                <FaEdit className="w-4 h-4 inline mr-1" />
+                Edit Symbols
+              </>
+            )}
           </button>
-        )}
+          {editMode && (
+            <button
+              onClick={handleSave}
+              className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2"
+            >
+              <FaSave className="w-4 h-4" />
+              Save Changes
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="overflow-x-auto">

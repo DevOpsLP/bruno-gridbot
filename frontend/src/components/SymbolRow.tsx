@@ -44,11 +44,19 @@ export default function SymbolRow({
 
   const handleSymbolChange = (symbol: string) => {
     setSelectedSymbol(symbol);
+    setSearchTerm("");
+    setShowDropdown(false);
     onUpdate(id, symbol, tpPercent, slPercent);
   };
 
   const handleUpdate = () => {
     onUpdate(id, selectedSymbol, tpPercent, slPercent);
+  };
+
+  const handleFocus = () => {
+    if (editMode) {
+      setShowDropdown(true);
+    }
   };
 
   const isStarting = loadingOperations[selectedSymbol] === 'starting';
@@ -71,27 +79,29 @@ export default function SymbolRow({
                 className="w-56 pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                 value={searchTerm || selectedSymbol}
                 onChange={(e) => setSearchTerm(e.target.value)}
+                onFocus={handleFocus}
                 onBlur={() => {
-                  if (searchTerm.trim() && searchTerm !== selectedSymbol) {
-                    setSelectedSymbol(searchTerm.toUpperCase());
-                    onUpdate(id, searchTerm.toUpperCase(), tpPercent, slPercent);
-                  }
+                  setTimeout(() => {
+                    setShowDropdown(false);
+                    if (searchTerm.trim() && searchTerm !== selectedSymbol) {
+                      setSelectedSymbol(searchTerm.toUpperCase());
+                      onUpdate(id, searchTerm.toUpperCase(), tpPercent, slPercent);
+                    }
+                  }, 200);
                 }}
                 disabled={isRunning}
               />
-              {searchTerm && (
-                <div className="absolute z-[100] w-48 mt-1 bg-white rounded-lg shadow-lg border border-gray-200 max-h-48 overflow-y-auto">
-                  {allSymbols
-                    .filter((s) => s.includes(searchTerm.toUpperCase()))
-                    .map((s) => (
-                      <div
-                        key={s}
-                        className="px-4 py-2 hover:bg-indigo-50 cursor-pointer transition-colors"
-                        onClick={() => handleSymbolChange(s)}
-                      >
-                        <span className="text-sm text-gray-700">{s}</span>
-                      </div>
-                    ))}
+              {showDropdown && searchTerm && (
+                <div className="absolute z-[9999] w-56 mt-1 bg-white rounded-lg shadow-lg border border-gray-200 max-h-48 overflow-y-auto">
+                  {filteredSymbols.map((s) => (
+                    <div
+                      key={s}
+                      className="px-4 py-2 hover:bg-indigo-50 cursor-pointer transition-colors"
+                      onClick={() => handleSymbolChange(s)}
+                    >
+                      <span className="text-sm text-gray-700">{s}</span>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
@@ -153,9 +163,9 @@ export default function SymbolRow({
           {!isRunning ? (
             <button
               onClick={() => onStart(selectedSymbol)}
-              disabled={isStarting || editMode}
+              disabled={isStarting || editMode || !selectedSymbol}
               className={`flex items-center justify-center px-3 py-1.5 rounded-lg text-white transition-colors text-sm
-                ${isStarting ? 'bg-gray-400 cursor-not-allowed' : 'bg-green-500 hover:bg-green-600'}`}
+                ${isStarting || editMode || !selectedSymbol ? 'bg-gray-400 cursor-not-allowed' : 'bg-green-500 hover:bg-green-600'}`}
             >
               <FaPlay className="w-3 h-3 mr-1.5" />
               <span>{isStarting ? 'Starting...' : 'Start'}</span>
