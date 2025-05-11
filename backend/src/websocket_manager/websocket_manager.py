@@ -1174,6 +1174,7 @@ def start_bybit_websocket(
 
     return ws_app
 
+
 def process_order_update(exchange_instance, symbol, bot_config_id, amount, step_size,
                          tick_size, min_notional, sl_buffer_percent, sell_rebound_percent, current_price):
     session = None
@@ -1184,24 +1185,9 @@ def process_order_update(exchange_instance, symbol, bot_config_id, amount, step_
             logger.error(f"⚠️ Bot config with ID {bot_config_id} not found.")
             return
 
-        # Safely parse JSON with error handling
-        try:
-            tp_levels = json.loads(bot_config.tp_levels_json or '[]')
-            sl_levels = json.loads(bot_config.sl_levels_json or '[]')
-        except json.JSONDecodeError:
-            logger.error(f"❌ Error parsing TP/SL levels JSON for bot {bot_config_id}")
-            return
-            
-        # Add logging to help debug
-        logger.info(f"{exchange_instance.id}: Checking stored TP: {tp_levels}, stored SL: {sl_levels}")
+        tp_levels = json.loads(bot_config.tp_levels_json)
+        sl_levels = json.loads(bot_config.sl_levels_json)
 
-        # Check balance before processing orders
-        base_asset, quote_asset = symbol.split('/')
-        balance = exchange_instance.fetch_balance()
-        quote_balance = balance.get(quote_asset, {}).get('free', 0)
-        base_balance = balance.get(base_asset, {}).get('free', 0)
-        
-        # Process TP orders
         for i in range(len(tp_levels)):
             if current_price >= tp_levels[i]:
                 triggered_tp = tp_levels.pop(i)
@@ -1209,8 +1195,8 @@ def process_order_update(exchange_instance, symbol, bot_config_id, amount, step_
                 session.commit()
                 logger.info(f"🎯 Price {current_price} hit TP {triggered_tp}")
 
-                # If we have no TP left, it means that was the last TP
-                if len(tp_levels) == 0:
+                # If i == 0, it means that was the last TP
+                if i == 0:
                     logger.info("All TPs filled! -> Resetting grid after delay.")
                     try:
                         open_orders = exchange_instance.fetch_open_orders(symbol)
@@ -1234,91 +1220,77 @@ def process_order_update(exchange_instance, symbol, bot_config_id, amount, step_
                     )
                     return
 
-                # Place new SL order only if we have enough quote balance
-                if quote_balance >= amount:
-                    new_sl_price = round_price(triggered_tp * (1 - sl_buffer_percent / 100), tick_size)
+                new_sl_price = round_price(triggered_tp * (1 - sl_buffer_percent / 100), tick_size)
 
-                    # Remove the oldest (lowest) SL level
-                    if sl_levels:
-                        last_sl = min(sl_levels)
-                        sl_levels.remove(last_sl)
+                # Here we remove the old SL and cancel it before placing the new SL
+                if sl_levels:
+                    last_sl = min(sl_levels)
+                    sl_levels.remove(last_sl)
 
-                        # Cancel the buy order matching last_sl
-                        try:
-                            open_orders = exchange_instance.fetch_open_orders(symbol)
-                            buy_orders = [o for o in open_orders if o.get('side', '').lower() == 'buy']
-                            tolerance = 1e-8
-                            order_to_cancel = None
-                            for o in buy_orders:
-                                if abs(float(o.get('price', 0)) - last_sl) < tolerance:
-                                    order_to_cancel = o
-                                    break
+                    # Cancel the buy order matching last_sl
+                    try:
+                        open_orders = exchange_instance.fetch_open_orders(symbol)
+                        buy_orders = [o for o in open_orders if o.get('side', '').lower() == 'buy']
+                        tolerance = 1e-8
+                        order_to_cancel = None
+                        for o in buy_orders:
+                            if abs(float(o.get('price', 0)) - last_sl) < tolerance:
+                                order_to_cancel = o
+                                break
 
-                            if order_to_cancel:
-                                exchange_instance.cancel_order(order_to_cancel['id'], symbol)
-                                logger.info(f"🛑 Cancelled last SL buy order {order_to_cancel['id']} @ {order_to_cancel['price']}")
-                            else:
-                                logger.warning(f"⚠️ No buy order found matching price {last_sl}")
-                        except Exception as e:
-                            logger.error(f"❌ Error cancelling last SL buy order @ {last_sl}: {e}")
+                        if order_to_cancel:
+                            exchange_instance.cancel_order(order_to_cancel['id'], symbol)
+                            logger.info(f"🛑 Cancelled last SL buy order {order_to_cancel['id']} @ {order_to_cancel['price']}")
+                        else:
+                            logger.warning(f"⚠️ No buy order found matching price {last_sl}")
+                    except Exception as e:
+                        logger.error(f"❌ Error cancelling last SL buy order @ {last_sl}: {e}")
 
-                    # Place new SL order
-                    threading.Timer(
-                        0.5,
-                        place_limit_buys,
-                        args=(exchange_instance, symbol, amount, [new_sl_price], step_size, min_notional)
-                    ).start()
+                sl_levels.insert(0, new_sl_price)
+                # Place the new limit buy in 0.5s
+                threading.Timer(
+                    0.5,
+                    place_limit_buys,
+                    args=(exchange_instance, symbol, amount, [new_sl_price], tick_size, min_notional)
+                ).start()
+                logger.info(f"{bot_config_id}: Checking stored TP: {tp_levels}, stored SL: {sl_levels}")
 
-                    # Add to SL levels
-                    sl_levels.append(new_sl_price)
-                    sl_levels.sort(reverse=True)  # Sort in descending order
-                    bot_config.sl_levels_json = json.dumps(sl_levels)
-                    session.commit()
-                else:
-                    logger.warning(f"Insufficient {quote_asset} balance ({quote_balance}) to place new SL order")
-                break
-
-        # Process SL orders
-        for sl_price in sl_levels[:]:  # Make a copy of the list to safely modify during iteration
-            if current_price <= sl_price:
-                sl_levels.remove(sl_price)  # Remove this triggered SL
-                
-                new_sl_price = round_price(sl_price * (1 - sl_buffer_percent / 100), tick_size)
-                new_sell_price = round_price(sl_price * (1 + sell_rebound_percent / 100), tick_size)
-                
-                # Make sure we have enough balance before placing orders
-                if base_balance <= step_size:
-                    logger.warning(f"Insufficient {base_asset} balance ({base_balance}) to place sell order")
-                else:
-                    # Place the sell order only if we have balance
-                    threading.Timer(
-                        0.5,
-                        place_limit_sell,
-                        args=(exchange_instance, symbol, base_balance, new_sell_price, step_size)
-                    ).start()
-                    
-                    # Add to TP levels
-                    tp_levels.append(new_sell_price)
-                    tp_levels.sort(reverse=True)  # Sort in descending order
-                
-                # Place the buy order only if we have enough quote balance
-                if quote_balance >= amount:
-                    threading.Timer(
-                        0.5,
-                        place_limit_buys,
-                        args=(exchange_instance, symbol, amount, [new_sl_price], step_size, min_notional)
-                    ).start()
-                    
-                    # Add to SL levels
-                    sl_levels.append(new_sl_price)
-                    sl_levels.sort(reverse=True)  # Sort in descending order
-                else:
-                    logger.warning(f"Insufficient {quote_asset} balance ({quote_balance}) to place new SL order")
-
-                # Update config with new arrays
-                bot_config.tp_levels_json = json.dumps(tp_levels)
                 bot_config.sl_levels_json = json.dumps(sl_levels)
                 session.commit()
+                break
+
+        # SL logic remains unchanged
+        for sl_price in sl_levels:
+            if current_price <= sl_price:
+                last_sl = min(sl_levels)
+                new_sl_price = round_price(last_sl * (1 - sl_buffer_percent / 100), tick_size)
+                new_sell_price = round_price(sl_price * (1 + sell_rebound_percent / 100), tick_size)
+                base_asset, _ = symbol.split('/')
+                balance = exchange_instance.fetch_balance()
+                base_balance = balance.get(base_asset, {}).get('free', 0)
+                
+                threading.Timer(
+                    0.5,
+                    place_limit_buys,
+                    args=(exchange_instance, symbol, amount, [new_sl_price], step_size, min_notional)
+                ).start()
+                threading.Timer(
+                    0.5,
+                    place_limit_sell,
+                    args=(exchange_instance, symbol, base_balance, new_sell_price, step_size)
+                ).start()
+                
+                sl_levels.remove(sl_price)
+                sl_levels.append(new_sl_price)
+                sl_levels.sort(reverse=True)
+                bot_config.sl_levels_json = json.dumps(sl_levels)
+
+                tp_levels.append(new_sell_price)
+                tp_levels.sort(reverse=True)
+                bot_config.tp_levels_json = json.dumps(tp_levels)
+                session.commit()
+                logger.info(f"{exchange_instance.id}: Checking stored TP: {tp_levels}, stored SL: {sl_levels}")
+
                 break
 
     except Exception as e:
@@ -1326,7 +1298,7 @@ def process_order_update(exchange_instance, symbol, bot_config_id, amount, step_
     finally:
         if session:
             session.close()
-            
+         
 def close_and_sell_all(exchange_instance, symbol):
     try:
         open_orders = exchange_instance.fetch_open_orders(symbol)
@@ -1335,8 +1307,8 @@ def close_and_sell_all(exchange_instance, symbol):
             logger.info(f"🛑 Cancelled order {order['id']}")
         base_asset, quote_asset = symbol.split('/')
         balance = exchange_instance.fetch_balance()
-        base_balance = balance.get(base_asset, {}).get('free')
-        if base_balance > 0:
+        base_balance = balance.get(base_asset, {}).get('free', 0)  # Default to 0 if None
+        if base_balance and float(base_balance) > 0:  # Check if balance exists and is greater than 0
             sell_order = exchange_instance.create_market_sell_order(symbol, base_balance)
             logger.info(f"💰 Sold {base_balance} {base_asset} for USDT")
         else:
